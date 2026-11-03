@@ -275,21 +275,30 @@ def predict(c, out, device, model_dir):
     LOG.info('Saved %d predictions to %s', offset, output)
 
 
-def main():
+def main(forced_action=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default=str(ROOT / 'config.yaml'))
-    sub = parser.add_subparsers(dest='action', required=True)
-    sub.add_parser('check', help='validate configuration and inspect local hardware')
-    sub.add_parser('train', help='fine-tune the configured model on the training CSV')
-    p = sub.add_parser('predict', help='classify the separate inference CSV')
-    p.add_argument('--model-dir', required=True, help='trained model directory from a train run')
+    if forced_action is None:
+        sub = parser.add_subparsers(dest='action', required=True)
+        sub.add_parser('check', help='validate configuration and inspect local hardware')
+        sub.add_parser('train', help='fine-tune the configured model on the training CSV')
+        prediction = sub.add_parser('predict', help='classify the separate inference CSV')
+        prediction.add_argument('--model-dir', help='override inference.model_dir in config')
+    elif forced_action == 'predict':
+        parser.add_argument('--model-dir', help='override inference.model_dir in config')
     args = parser.parse_args()
+    if forced_action is not None:
+        args.action = forced_action
     try:
         c = read_config(args.config)
         device = configure_device(c)
         if args.action == 'check':
             print(f'Configuration valid. Device: {device}; model: {repository_id(c["model"]["source"])}; cache: {c["model"]["cache_dir"]}')
             return 0
+        if args.action == 'predict':
+            args.model_dir = args.model_dir or c['inference'].get('model_dir')
+            if not isinstance(args.model_dir, str) or not args.model_dir.strip():
+                raise ValueError('Set inference.model_dir in config.yaml or pass --model-dir')
         out = setup_run(c, args.action)
         try:
             LOG.info('Device: %s', device)

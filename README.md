@@ -17,11 +17,11 @@ Fine-tune a Hugging Face **sequence classification** model on a binary labeled C
 5. Train and then use the **model directory printed by training**:
 
    ```bash
-   python3 phishing.py train
-   python3 phishing.py predict --model-dir /workspace/phishing-detect-output/train-<timestamp>/model
+   python3 finetune.py
+   python3 inference.py --model-dir /workspace/phishing-detect-output/train-<timestamp>/model
    ```
 
-   Replace `<timestamp>` with the actual directory. Use `python3 phishing.py --config /path/to/config.yaml train` to select another configuration. `check` validates settings and reports the detected device without downloading a model or checking dataset contents. Training reads only the training CSV and optional evaluation CSV; prediction reads the inference CSV and saved model, without downloading the base model.
+   Replace `<timestamp>` with the actual directory. Both scripts read the same `config.yaml`. Set `inference.model_dir` to the saved model directory to run `python3 inference.py` without an argument. Pass `--config /path/to/config.yaml` to either script to select another shared configuration; `--model-dir` overrides the configured model directory. `check` validates settings and reports the detected device without downloading a model or checking dataset contents. Training reads only the training CSV and optional evaluation CSV; prediction reads the inference CSV and saved model, without downloading the base model.
 6. Retrieve outputs from `/workspace/phishing-detect-output` and stop the Pod when finished. A running GPU Pod continues to incur charges. Mount persistent storage at `/workspace` if results must survive Pod replacement; the path alone does not guarantee persistence.
 
 An optional `Dockerfile` builds a CUDA/Python image for a Pod. It keeps the container alive without starting an experiment or exposing a terminal service. You must have an appropriate way to execute commands inside the container and supply `/workspace` storage. The image includes the default config; mount or copy a custom config and use `--config` to override it. The image has not been built or tested on Runpod.
