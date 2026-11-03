@@ -392,6 +392,52 @@ def train(c, out, device):
     LOG.info('Saved trained model to %s', model_dir)
 
 
+def predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task):
+    from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
+    if 'model_response' in fields:
+        raise ValueError('Inference CSV already contains model_response')
+    cls = AutoModelForCausalLM if task == 'causal_lm' else AutoModelForSeq2SeqLM
+    model, info = cls.from_pretrained(reference, output_loading_info=True, **opts)
+    if info['missing_keys'] or info['mismatched_keys'] or info['error_msgs']:
+        raise ValueError('Inference model weights are incomplete')
+    model = model.to(device).eval()
+    if tokenizer.pad_token is None:
+        if tokenizer.eos_token is None:
+            raise ValueError('Inference tokenizer has no padding or EOS token')
+        tokenizer.pad_token = tokenizer.eos_token
+    if task == 'causal_lm':
+        tokenizer.padding_side = 'left'
+    inf = c['inference']
+    settings = {'do_sample': inf.get('do_sample', False), 'max_new_tokens': inf.get('max_new_tokens', 32), 'pad_token_id': tokenizer.pad_token_id}
+    if settings['do_sample']:
+        settings.update(temperature=inf.get('temperature', 0.7), top_p=inf.get('top_p', 0.9))
+    # Use a fresh configuration rather than inheriting model-specific sampling defaults.
+    from transformers import GenerationConfig
+    settings['eos_token_id'] = model.generation_config.eos_token_id
+    gen = GenerationConfig(**settings)
+    seed = c['training']['seed']
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
+    with (out / 'predictions.csv').open('w', newline='', encoding='utf-8') as f, torch.inference_mode():
+        writer = csv.DictWriter(f, fieldnames=fields + ['model_response'])
+        writer.writeheader()
+        size = inf['batch_size']
+        for offset in range(0, len(rows), size):
+            group = rows[offset:offset + size]
+            inputs = tokenizer([prompt_for(c, r[c['data']['text_column']]) for r in group], padding=True, truncation=True, max_length=c['data']['max_length'], return_tensors='pt').to(device)
+            with autocast(device, c['training']['precision']):
+                generated = model.generate(**inputs, generation_config=gen)
+            if task == 'causal_lm': generated = generated[:, inputs['input_ids'].shape[1]:]
+            outputs = tokenizer.batch_decode(generated, skip_special_tokens=True)
+            for row, response in zip(group, outputs):
+                writer.writerow({**row, 'model_response': response})
+    meta = common_metadata(c, device)
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': inf.get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'generation_settings': settings, 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
+    (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
+    LOG.info('Saved %d generated responses to %s', len(rows), out / 'predictions.csv')
+
+
 def predict(c, out, device, model_source):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     data = c['data']
@@ -400,7 +446,10 @@ def predict(c, out, device, model_source):
     if any(x in fields for x in extra):
         raise ValueError(f'Inference CSV already contains an output column: {extra}')
     reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['model']['cache_dir'])
+    task = select_task(reference, opts, c['inference'].get('task', 'auto'))
     tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
+    if task != 'classification':
+        return predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task)
     model, loading_info = AutoModelForSequenceClassification.from_pretrained(reference, output_loading_info=True, **opts)
     if loading_info['missing_keys'] or loading_info['mismatched_keys'] or loading_info['error_msgs']:
         raise ValueError('Inference model did not load all classifier weights; choose an already trained binary classifier')
@@ -435,7 +484,7 @@ def predict(c, out, device, model_source):
                 writer.writerow({**rows[offset], 'predicted_label': labels[positive if prob >= c['inference']['threshold'] else negative], 'phishing_probability': prob})
                 offset += 1
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'positive_label_index': positive, 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'positive_label_index': positive, 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d predictions to %s', offset, output)
 
