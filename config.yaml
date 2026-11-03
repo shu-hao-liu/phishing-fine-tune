@@ -1,5 +1,5 @@
 model:
-  # Hugging Face repository ID or https://huggingface.co/<owner>/<model>
+  # Hugging Face repository ID/URL, local:Model-1, or /workspace/fine-tuned-weights/Model-1
   source: FacebookAI/xlm-roberta-base
   revision: main  # Pin a commit hash for reproducible runs.
   cache_dir: /tmp/phishing-detect-hf-cache  # Pod-local disk, not /workspace.
@@ -12,6 +12,7 @@ data:
   positive_label: phishing
   max_length: 512
 training:
+  output_model_name: Model-1  # Saved to /workspace/fine-tuned-weights/Model-1; must not already exist.
   epochs: 3
   learning_rate: 0.00002
   batch_size: 8
@@ -21,7 +22,7 @@ training:
   seed: 42
   precision: fp32  # fp32, fp16, or bf16 (mixed precision requires CUDA)
 inference:
-  # Model for inference: HF repository ID/URL or local fine-tuned model directory.
+  # Inference model: HF repository ID/URL, local:Model-1, or /workspace/fine-tuned-weights/Model-1.
   # Leave null and set model_dir below to use an existing local model.
   model_source: null
   model_revision: main

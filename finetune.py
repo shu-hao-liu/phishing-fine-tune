@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import random
+import shutil
 import sys
 from urllib.parse import urlparse
 
@@ -19,6 +20,7 @@ from torch.utils.data import DataLoader, Dataset
 import yaml
 
 ROOT = Path(__file__).resolve().parent
+WEIGHTS_ROOT = Path('/workspace/fine-tuned-weights')
 LOG = logging.getLogger('phishing')
 
 
@@ -37,13 +39,45 @@ def repository_id(source):
     return source
 
 
+def validate_model_name(name):
+    if not isinstance(name, str) or not name or name in ('.', '..') or name != name.strip() or '/' in name or '\\' in name:
+        raise ValueError('training.output_model_name must be a simple folder name')
+    return name
+
+
+def resolve_model_source(source, revision, cache_dir, require_exists=True):
+    """Use a local directory or a Hub repository without silently substituting."""
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError('Model source must be a local directory or Hugging Face repository')
+    source = source.strip()
+    if source.startswith('local:'):
+        name = validate_model_name(source[len('local:'):])
+        path = WEIGHTS_ROOT / name
+        is_local = True
+    elif source.startswith('fine-tuned-weights/'):
+        name = validate_model_name(source[len('fine-tuned-weights/'):])
+        path = WEIGHTS_ROOT / name
+        is_local = True
+    else:
+        path = Path(source).expanduser()
+        named_path = WEIGHTS_ROOT / source
+        if not source.startswith(('http://', 'https://')) and '/' not in source and named_path.is_dir():
+            path = named_path
+        is_local = path.is_dir() or source.startswith(('/', './', '../', '~'))
+    if is_local:
+        if require_exists and not path.is_dir():
+            raise FileNotFoundError(f'Model directory not found: {path}')
+        return str(path.resolve()), {'local_files_only': True, 'trust_remote_code': False}
+    return repository_id(source), {'revision': revision, 'cache_dir': cache_dir, 'trust_remote_code': False}
+
+
 def read_config(path, train_csv_override=None):
     with open(path, encoding='utf-8') as f:
         c = yaml.safe_load(f)
     for section in ('model', 'data', 'training', 'inference'):
         if not isinstance(c.get(section), dict):
             raise ValueError(f'Missing {section} configuration')
-    repository_id(c['model'].get('source'))
+    resolve_model_source(c['model'].get('source'), c['model'].get('revision'), c['model'].get('cache_dir'), require_exists=False)
     for key in ('revision', 'cache_dir'):
         if not isinstance(c['model'].get(key), str) or not c['model'][key].strip():
             raise ValueError(f'model.{key} must be a nonempty string')
@@ -70,6 +104,7 @@ def read_config(path, train_csv_override=None):
         v = c['training'].get(key)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or (key != 'weight_decay' and v == 0):
             raise ValueError(f'training.{key} must be a finite valid number')
+    validate_model_name(c['training'].get('output_model_name'))
     seed = c['training'].get('seed')
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
         raise ValueError('training.seed must be an integer in [0, 2^32)')
@@ -183,6 +218,9 @@ def make_loader(rows, tokenizer, c, labels=None, shuffle=False, batch_size=None)
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['training']
+    model_dir = WEIGHTS_ROOT / validate_model_name(settings['output_model_name'])
+    if model_dir.exists():
+        raise FileExistsError(f'Trained model directory already exists: {model_dir}; choose a different output_model_name')
     _, rows = read_csv(data['train_csv'], data['text_column'], data['label_column'])
     classes = sorted({r[data['label_column']].strip() for r in rows})
     if len(classes) != 2 or data['positive_label'] not in classes:
@@ -199,9 +237,8 @@ def train(c, out, device):
     random.seed(seed)
     torch.manual_seed(seed)
     if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
-    repo = repository_id(c['model']['source'])
-    opts = {'revision': c['model']['revision'], 'cache_dir': c['model']['cache_dir'], 'trust_remote_code': False}
-    LOG.info('Loading %s at %s (cache %s)', repo, opts['revision'], opts['cache_dir'])
+    repo, opts = resolve_model_source(c['model']['source'], c['model']['revision'], c['model']['cache_dir'])
+    LOG.info('Loading training model %s', repo)
     tokenizer = AutoTokenizer.from_pretrained(repo, **opts)
     if tokenizer.pad_token is None:
         if tokenizer.eos_token is None:
@@ -249,11 +286,16 @@ def train(c, out, device):
                 total += len(target)
         LOG.info('Evaluation accuracy: %.4f (%d/%d)', correct / total, correct, total)
         (out / 'evaluation.json').write_text(json.dumps({'accuracy': correct / total, 'correct': correct, 'count': total}, indent=2))
-    model_dir = out / 'model'
-    model.save_pretrained(model_dir)
-    tokenizer.save_pretrained(model_dir)
+    WEIGHTS_ROOT.mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(exist_ok=False)
+    try:
+        model.save_pretrained(model_dir)
+        tokenizer.save_pretrained(model_dir)
+    except Exception:
+        shutil.rmtree(model_dir)
+        raise
     metadata = common_metadata(c, device)
-    metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'labels': labels, 'training_csv_sha256': sha256(data['train_csv']), 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
+    metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'labels': labels, 'trained_model_dir': str(model_dir), 'training_csv_sha256': sha256(data['train_csv']), 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     LOG.info('Saved trained model to %s', model_dir)
 
@@ -265,16 +307,7 @@ def predict(c, out, device, model_source):
     extra = ['predicted_label', 'phishing_probability']
     if any(x in fields for x in extra):
         raise ValueError(f'Inference CSV already contains an output column: {extra}')
-    # Existing paths are local; model links and repository IDs use the local HF cache.
-    model_path = Path(model_source).expanduser()
-    if model_path.is_dir():
-        reference = str(model_path.resolve())
-        opts = {'local_files_only': True, 'trust_remote_code': False}
-    else:
-        if model_source.startswith(('/', '.', '~')):
-            raise FileNotFoundError(f'Inference model directory not found: {model_source}')
-        reference = repository_id(model_source)
-        opts = {'revision': c['inference'].get('model_revision', 'main'), 'cache_dir': c['model']['cache_dir'], 'trust_remote_code': False}
+    reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['model']['cache_dir'])
     tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
     model, loading_info = AutoModelForSequenceClassification.from_pretrained(reference, output_loading_info=True, **opts)
     if loading_info['missing_keys'] or loading_info['mismatched_keys'] or loading_info['error_msgs']:
@@ -336,7 +369,7 @@ def main(forced_action=None):
         c = read_config(args.config, getattr(args, 'train_csv', None))
         device = configure_device(c)
         if args.action == 'check':
-            print(f'Configuration valid. Device: {device}; model: {repository_id(c["model"]["source"])}; cache: {c["model"]["cache_dir"]}')
+            print(f'Configuration valid. Device: {device}; model: {c["model"]["source"]}; cache: {c["model"]["cache_dir"]}')
             return 0
         if args.action == 'predict':
             args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')

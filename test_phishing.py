@@ -16,6 +16,9 @@ class PhishingTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=p.ROOT)
         self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
+        self.weights_patch = patch.object(p, 'WEIGHTS_ROOT', self.root / 'weights')
+        self.weights_patch.start()
+        self.addCleanup(self.weights_patch.stop)
         self.c = yaml.safe_load((p.ROOT / 'config.yaml').read_text())
         self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), max_length=16)
         self.c['training'].update(epochs=1, batch_size=2, gradient_accumulation_steps=2)
@@ -56,11 +59,15 @@ class PhishingTests(unittest.TestCase):
             p.train(self.c, train_dir, torch.device('cpu'))
         pred_dir = self.root / 'predicted'
         pred_dir.mkdir()
-        p.predict(self.c, pred_dir, torch.device('cpu'), str(train_dir / 'model'))
+        p.predict(self.c, pred_dir, torch.device('cpu'), str(p.WEIGHTS_ROOT / 'Model-1'))
         with (pred_dir / 'predictions.csv').open(newline='') as f: rows = list(csv.DictReader(f))
         self.assertEqual([r['id'] for r in rows], ['1', '2'])
         self.assertTrue(all(r['predicted_label'] in ('legitimate', 'phishing') and 0 <= float(r['phishing_probability']) <= 1 for r in rows))
-        self.assertTrue((train_dir / 'model' / 'config.json').exists())
+        self.assertTrue((p.WEIGHTS_ROOT / 'Model-1' / 'config.json').exists())
+        self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.WEIGHTS_ROOT / 'Model-1').resolve()))
+        with self.assertRaises(FileExistsError):
+            p.train(self.c, train_dir, torch.device('cpu'))
+
         # A separately selected Hub classifier can use a different positive index.
         model.config.id2label = {0: 'phishing', 1: 'legitimate'}
         self.c['inference'].update(model_source='other/classifier', model_revision='revision123', positive_label_index=0)
