@@ -75,6 +75,15 @@ def read_config(path, train_csv_override=None):
         raise ValueError('training.seed must be an integer in [0, 2^32)')
     if c['training'].get('precision') not in ('fp32', 'fp16', 'bf16'):
         raise ValueError('training.precision must be fp32, fp16, or bf16')
+    inference_model = c['inference'].get('model_source')
+    if inference_model is not None and (not isinstance(inference_model, str) or not inference_model.strip()):
+        raise ValueError('inference.model_source must be null or a model repository, URL, or local directory')
+    revision = c['inference'].get('model_revision', 'main')
+    if not isinstance(revision, str) or not revision.strip():
+        raise ValueError('inference.model_revision must be a nonempty string')
+    positive_index = c['inference'].get('positive_label_index')
+    if positive_index is not None and (isinstance(positive_index, bool) or positive_index not in (0, 1)):
+        raise ValueError('inference.positive_label_index must be null, 0, or 1')
     threshold = c['inference'].get('threshold')
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError('inference.threshold must be between 0 and 1')
@@ -249,18 +258,43 @@ def train(c, out, device):
     LOG.info('Saved trained model to %s', model_dir)
 
 
-def predict(c, out, device, model_dir):
+def predict(c, out, device, model_source):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     data = c['data']
     fields, rows = read_csv(data['inference_csv'], data['text_column'])
     extra = ['predicted_label', 'phishing_probability']
     if any(x in fields for x in extra):
         raise ValueError(f'Inference CSV already contains an output column: {extra}')
-    tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True, trust_remote_code=False)
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir, local_files_only=True, trust_remote_code=False).to(device)
+    # Existing paths are local; model links and repository IDs use the local HF cache.
+    model_path = Path(model_source).expanduser()
+    if model_path.is_dir():
+        reference = str(model_path.resolve())
+        opts = {'local_files_only': True, 'trust_remote_code': False}
+    else:
+        if model_source.startswith(('/', '.', '~')):
+            raise FileNotFoundError(f'Inference model directory not found: {model_source}')
+        reference = repository_id(model_source)
+        opts = {'revision': c['inference'].get('model_revision', 'main'), 'cache_dir': c['model']['cache_dir'], 'trust_remote_code': False}
+    tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
+    model, loading_info = AutoModelForSequenceClassification.from_pretrained(reference, output_loading_info=True, **opts)
+    if loading_info['missing_keys'] or loading_info['mismatched_keys'] or loading_info['error_msgs']:
+        raise ValueError('Inference model did not load all classifier weights; choose an already trained binary classifier')
+    model = model.to(device)
+    if tokenizer.pad_token is None:
+        if tokenizer.eos_token is None:
+            raise ValueError('Inference tokenizer has no padding or EOS token')
+        tokenizer.pad_token = tokenizer.eos_token
+        model.config.pad_token_id = tokenizer.pad_token_id
     labels = {int(k): v for k, v in model.config.id2label.items()}
-    if set(labels) != {0, 1} or labels[1] != data['positive_label']:
-        raise ValueError('Model label mapping must have positive_label at index 1; use the model saved by this project')
+    if set(labels) != {0, 1}:
+        raise ValueError('Inference model must be a binary sequence classifier')
+    positive = c['inference'].get('positive_label_index')
+    if positive is None:
+        matches = [index for index, label in labels.items() if label == data['positive_label']]
+        if len(matches) != 1:
+            raise ValueError('Model labels do not identify positive_label; set inference.positive_label_index explicitly')
+        positive = matches[0]
+    negative = 1 - positive
     loader = make_loader(rows, tokenizer, c, batch_size=c['inference']['batch_size'])
     model.eval()
     output = out / 'predictions.csv'
@@ -271,12 +305,12 @@ def predict(c, out, device, model_dir):
         for batch in loader:
             with autocast(device, c['training']['precision']):
                 logits = model(**{k: v.to(device) for k, v in batch.items()}).logits
-            probs = torch.softmax(logits.float(), dim=-1)[:, 1].cpu().tolist()
+            probs = torch.softmax(logits.float(), dim=-1)[:, positive].cpu().tolist()
             for prob in probs:
-                writer.writerow({**rows[offset], 'predicted_label': labels[1 if prob >= c['inference']['threshold'] else 0], 'phishing_probability': prob})
+                writer.writerow({**rows[offset], 'predicted_label': labels[positive if prob >= c['inference']['threshold'] else negative], 'phishing_probability': prob})
                 offset += 1
     meta = common_metadata(c, device)
-    meta.update({'trained_model_dir': str(Path(model_dir).resolve()), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'positive_label_index': positive, 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d predictions to %s', offset, output)
 
@@ -289,12 +323,12 @@ def main(forced_action=None):
         sub.add_parser('check', help='validate configuration and inspect local hardware')
         sub.add_parser('train', help='fine-tune the configured model on the training CSV')
         prediction = sub.add_parser('predict', help='classify the separate inference CSV')
-        prediction.add_argument('--model-dir', help='override inference.model_dir in config')
+        prediction.add_argument('--model-dir', help='override inference model source in config')
     elif forced_action == 'train':
         parser.add_argument('--train-csv', help='override data.train_csv in the shared config')
         parser.add_argument('--check', action='store_true', help='validate configuration and inspect local hardware')
     elif forced_action == 'predict':
-        parser.add_argument('--model-dir', help='override inference.model_dir in config')
+        parser.add_argument('--model-dir', help='override inference model source in config')
     args = parser.parse_args()
     if forced_action is not None:
         args.action = 'check' if forced_action == 'train' and args.check else forced_action
@@ -305,9 +339,9 @@ def main(forced_action=None):
             print(f'Configuration valid. Device: {device}; model: {repository_id(c["model"]["source"])}; cache: {c["model"]["cache_dir"]}')
             return 0
         if args.action == 'predict':
-            args.model_dir = args.model_dir or c['inference'].get('model_dir')
+            args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():
-                raise ValueError('Set inference.model_dir in config.yaml or pass --model-dir')
+                raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
         out = setup_run(c, args.action)
         try:
             LOG.info('Device: %s', device)

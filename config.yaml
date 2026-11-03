@@ -21,6 +21,11 @@ training:
   seed: 42
   precision: fp32  # fp32, fp16, or bf16 (mixed precision requires CUDA)
 inference:
+  # Model for inference: HF repository ID/URL or local fine-tuned model directory.
+  # Leave null and set model_dir below to use an existing local model.
+  model_source: null
+  model_revision: main
+  positive_label_index: null  # Optional 0 or 1 when model labels do not name the positive class.
   model_dir: null  # Set to the fine-tuned model directory.
   batch_size: 16
   threshold: 0.5  # Positive class probability threshold.
