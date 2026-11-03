@@ -23,7 +23,7 @@ class PhishingTests(unittest.TestCase):
         self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), max_length=16)
         self.c['model']['task'] = 'classification'
         self.c['inference']['task'] = 'classification'
-        self.c['training'].update(epochs=1, batch_size=2, gradient_accumulation_steps=2)
+        self.c['training'].update(output_model_name='Model-1', epochs=1, batch_size=2, gradient_accumulation_steps=2)
         self.c['output_dir'] = str(self.root / 'out')
         for name in ('train', 'infer'):
             (self.root / name).mkdir()
