@@ -59,3 +59,13 @@ Run local offline tests with `python3 -m unittest -v`. They train and predict wi
 Run `python3 auto_commit.py` in the project folder to check for changes every two seconds, commit unignored files, and push to the configured upstream branch. Keep the process running; stop it with Ctrl-C. Use `--once` for one check, `--no-push` for local commits only, or `--interval 10` to change the interval. It refuses to include already-staged changes and never force-pushes. Git credentials and network access must be available to the running process. If a push fails, it reports the error and retries on a later check. Only one updated auto-committer can run per checkout; a second instance exits with a clear message. Other Git commands can still briefly lock the index, so transient lock errors are retried. If an index lock persists after all Git processes have stopped, inspect the repository before removing it.
 
 CSV and common dataset, checkpoint, model-weight, and secret-file extensions are ignored by default. Review `.gitignore` before using automatic pushes: other unignored files will be committed and sent to GitHub.
+
+## Split the final 20% of a CSV
+
+```bash
+python3 split_csv.py
+```
+
+This removes the last 20% of data records from `train.csv` in the project folder and writes them to a new `inference.csv` in that folder. Both files keep the original header and record text; no rows are shuffled or modified. If 20% is not a whole number of records, the holdout count is rounded up. The tool does not overwrite an existing `inference.csv`.
+
+To use other paths, run `python3 split_csv.py --train /path/to/train.csv --inference /path/to/inference.csv`. Update `data.train_csv` and `data.inference_csv` in `config.yaml` to those paths; the training and inference CSVs must be in different directories for the experiment. The splitter does not modify the configuration.
