@@ -170,7 +170,7 @@ def autocast(device, precision):
 
 def common_metadata(c, device):
     import transformers
-    return {'model_source': c['model']['source'], 'requested_revision': c['model']['revision'], 'torch': torch.__version__, 'transformers': transformers.__version__, 'python': sys.version, 'device': str(device), 'gpu': torch.cuda.get_device_name(0) if device.type == 'cuda' else None, 'seed': c['training']['seed']}
+    return {'training_base_model_source': c['model']['source'], 'training_base_requested_revision': c['model']['revision'], 'torch': torch.__version__, 'transformers': transformers.__version__, 'python': sys.version, 'device': str(device), 'gpu': torch.cuda.get_device_name(0) if device.type == 'cuda' else None, 'seed': c['training']['seed']}
 
 
 def make_loader(rows, tokenizer, c, labels=None, shuffle=False, batch_size=None):

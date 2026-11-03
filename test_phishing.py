@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -60,6 +61,20 @@ class PhishingTests(unittest.TestCase):
         self.assertEqual([r['id'] for r in rows], ['1', '2'])
         self.assertTrue(all(r['predicted_label'] in ('legitimate', 'phishing') and 0 <= float(r['phishing_probability']) <= 1 for r in rows))
         self.assertTrue((train_dir / 'model' / 'config.json').exists())
+        # A separately selected Hub classifier can use a different positive index.
+        model.config.id2label = {0: 'phishing', 1: 'legitimate'}
+        self.c['inference'].update(model_source='other/classifier', model_revision='revision123', positive_label_index=0)
+        alternate_dir = self.root / 'alternate'
+        alternate_dir.mkdir()
+        info = {'missing_keys': [], 'mismatched_keys': [], 'error_msgs': []}
+        with patch.object(AutoTokenizer, 'from_pretrained', return_value=tokenizer) as tokenizer_load, patch.object(AutoModelForSequenceClassification, 'from_pretrained', return_value=(model, info)) as model_load:
+            p.predict(self.c, alternate_dir, torch.device('cpu'), self.c['inference']['model_source'])
+        self.assertEqual(model_load.call_args.args[0], 'other/classifier')
+        self.assertEqual(tokenizer_load.call_args.kwargs['revision'], 'revision123')
+        metadata = json.loads((alternate_dir / 'metadata.json').read_text())
+        self.assertEqual(metadata['positive_label_index'], 0)
+        self.assertEqual(metadata['inference_model_source'], 'other/classifier')
+
 
 
 if __name__ == '__main__': unittest.main()
