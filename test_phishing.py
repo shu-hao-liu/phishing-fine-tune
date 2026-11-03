@@ -21,10 +21,10 @@ class PhishingTests(unittest.TestCase):
         self.addCleanup(self.weights_patch.stop)
         self.c = yaml.safe_load((p.ROOT / 'config.yaml').read_text())
         self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), max_length=16)
-        self.c['model']['task'] = 'classification'
+        self.c['train']['task'] = 'classification'
         self.c['inference']['task'] = 'classification'
-        self.c['training'].update(output_model_name='Model-1', epochs=1, batch_size=2, gradient_accumulation_steps=2)
-        self.c['output_dir'] = str(self.root / 'out')
+        self.c['train'].update(output_model_name='Model-1', epochs=1, batch_size=2, gradient_accumulation_steps=2)
+        self.c['train']['output_dir'] = self.c['inference']['output_dir'] = str(self.root / 'out')
         for name in ('train', 'infer'):
             (self.root / name).mkdir()
         (self.root / 'train' / 'train.csv').write_text('text,label\nclick now,phishing\nhello friend,legitimate\nverify now,phishing\n')
@@ -51,7 +51,7 @@ class PhishingTests(unittest.TestCase):
         vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\nphishing\nlegitimate\n')
         tokenizer = DistilBertTokenizerFast(vocab_file=str(vocab))
         self.c['data']['max_length'] = 16
-        self.c['generation'] = {'prompt_template': '{text}'}
+        self.c['data']['prompt_template'] = '{text}'
         self.c['inference'].update(max_new_tokens=2, do_sample=False)
         for task in ('causal_lm', 'seq2seq'):
             with self.subTest(task=task):
@@ -65,8 +65,8 @@ class PhishingTests(unittest.TestCase):
                     cfg = T5Config(vocab_size=len(tokenizer), d_model=16, d_ff=32, num_layers=1, num_decoder_layers=1, num_heads=2, decoder_start_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.sep_token_id, pad_token_id=tokenizer.pad_token_id)
                     model = AutoModelForSeq2SeqLM.from_config(cfg)
                 model.save_pretrained(base)
-                self.c['model'].update(source=str(base), task=task)
-                self.c['training']['output_model_name'] = task
+                self.c['train'].update(model_source=str(base), task=task)
+                self.c['train']['output_model_name'] = task
                 self.c['inference']['task'] = 'auto'
                 run = self.root / ('run-' + task)
                 run.mkdir()
@@ -104,8 +104,8 @@ class PhishingTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             p.train(self.c, train_dir, torch.device('cpu'))
         # Train again from the already saved local weights, with no Hub download.
-        self.c['model']['source'] = 'local:Model-1'
-        self.c['training']['output_model_name'] = 'Model-2'
+        self.c['train']['model_source'] = 'local:Model-1'
+        self.c['train']['output_model_name'] = 'Model-2'
         p.train(self.c, train_dir, torch.device('cpu'))
         self.assertTrue((p.WEIGHTS_ROOT / 'Model-2' / 'config.json').exists())
 

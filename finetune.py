@@ -41,7 +41,7 @@ def repository_id(source):
 
 def validate_model_name(name):
     if not isinstance(name, str) or not name or name in ('.', '..') or name != name.strip() or '/' in name or '\\' in name:
-        raise ValueError('training.output_model_name must be a simple folder name')
+        raise ValueError('train.output_model_name must be a simple folder name')
     return name
 
 
@@ -74,26 +74,28 @@ def resolve_model_source(source, revision, cache_dir, require_exists=True):
 def read_config(path, train_csv_override=None):
     with open(path, encoding='utf-8') as f:
         c = yaml.safe_load(f)
-    for section in ('model', 'data', 'training', 'inference'):
+    for section in ('train', 'data', 'inference'):
         if not isinstance(c.get(section), dict):
             raise ValueError(f'Missing {section} configuration')
-    resolve_model_source(c['model'].get('source'), c['model'].get('revision'), c['model'].get('cache_dir'), require_exists=False)
-    for key in ('revision', 'cache_dir'):
-        if not isinstance(c['model'].get(key), str) or not c['model'][key].strip():
-            raise ValueError(f'model.{key} must be a nonempty string')
-    for section in ('model', 'inference'):
+    resolve_model_source(c['train'].get('model_source'), c['train'].get('model_revision'), c['train'].get('cache_dir'), require_exists=False)
+    for section in ('train', 'inference'):
+        for key in ('cache_dir', 'output_dir'):
+            if not isinstance(c[section].get(key), str) or not c[section][key].strip():
+                raise ValueError(f'{section}.{key} must be a nonempty string')
+    if not isinstance(c['train'].get('model_revision'), str) or not c['train']['model_revision'].strip():
+        raise ValueError('train.model_revision must be a nonempty string')
+    for section in ('train', 'inference'):
         if not isinstance(c[section].get('trust_remote_code', False), bool):
             raise ValueError(f'{section}.trust_remote_code must be boolean')
         if c[section].get('task', 'auto') not in ('auto', 'classification', 'causal_lm', 'seq2seq'):
             raise ValueError(f'{section}.task must be auto, classification, causal_lm, or seq2seq')
-    generation = c.get('generation', {})
-    template = generation.get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:')
+    template = c['data'].get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:')
     try:
         if not isinstance(template, str) or '{text}' not in template:
-            raise ValueError('generation.prompt_template must include {text}')
+            raise ValueError('data.prompt_template must include {text}')
         template.format(text='sample')
     except (KeyError, IndexError, ValueError) as exc:
-        raise ValueError('generation.prompt_template must contain only a valid {text} placeholder') from exc
+        raise ValueError('data.prompt_template must contain only a valid {text} placeholder') from exc
     if train_csv_override is not None:
         c['data']['train_csv'] = train_csv_override
     for key in ('train_csv', 'inference_csv', 'text_column', 'label_column', 'positive_label'):
@@ -109,20 +111,20 @@ def read_config(path, train_csv_override=None):
         raise ValueError('Training and inference CSVs must be in different directories')
     if c['data'].get('eval_csv') and Path(c['data']['eval_csv']).expanduser().resolve() in (train, inference):
         raise ValueError('Evaluation CSV must differ from training and inference CSVs')
-    for sec, key in [('data', 'max_length'), ('training', 'epochs'), ('training', 'batch_size'), ('training', 'gradient_accumulation_steps'), ('inference', 'batch_size')]:
+    for sec, key in [('data', 'max_length'), ('train', 'epochs'), ('train', 'batch_size'), ('train', 'gradient_accumulation_steps'), ('inference', 'batch_size')]:
         v = c[sec].get(key)
         if isinstance(v, bool) or not isinstance(v, int) or v < 1:
             raise ValueError(f'{sec}.{key} must be a positive integer')
     for key in ('learning_rate', 'weight_decay', 'max_grad_norm'):
-        v = c['training'].get(key)
+        v = c['train'].get(key)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or (key != 'weight_decay' and v == 0):
-            raise ValueError(f'training.{key} must be a finite valid number')
-    validate_model_name(c['training'].get('output_model_name'))
-    seed = c['training'].get('seed')
+            raise ValueError(f'train.{key} must be a finite valid number')
+    validate_model_name(c['train'].get('output_model_name'))
+    seed = c['train'].get('seed')
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
-        raise ValueError('training.seed must be an integer in [0, 2^32)')
-    if c['training'].get('precision') not in ('fp32', 'fp16', 'bf16'):
-        raise ValueError('training.precision must be fp32, fp16, or bf16')
+        raise ValueError('train.seed must be an integer in [0, 2^32)')
+    if c['train'].get('precision') not in ('fp32', 'fp16', 'bf16'):
+        raise ValueError('train.precision must be fp32, fp16, or bf16')
     inference_model = c['inference'].get('model_source')
     if inference_model is not None and (not isinstance(inference_model, str) or not inference_model.strip()):
         raise ValueError('inference.model_source must be null or a model repository, URL, or local directory')
@@ -144,8 +146,9 @@ def read_config(path, train_csv_override=None):
         value = inf.get(key, 0.7 if key == 'temperature' else 0.9)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or (upper is not None and value > upper):
             raise ValueError(f'inference.{key} must be positive' + (' and at most 1' if upper else ''))
-    if not isinstance(c.get('output_dir'), str) or not c['output_dir'].strip():
-        raise ValueError('output_dir must be a nonempty path')
+    progress = c['train'].get('progress_every', 1)
+    if isinstance(progress, bool) or not isinstance(progress, int) or progress < 1:
+        raise ValueError('train.progress_every must be a positive integer')
     return c
 
 
@@ -194,7 +197,7 @@ class TextDataset(Dataset):
 
 
 def setup_run(config, operation):
-    out = Path(config['output_dir']).expanduser()
+    out = Path(config['train' if operation == 'train' else 'inference']['output_dir']).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     run = out / (operation + '-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
     run.mkdir()
@@ -211,7 +214,7 @@ def setup_run(config, operation):
 
 def configure_device(c):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precision = c['training']['precision']
+    precision = c['train']['precision']
     if precision != 'fp32' and device.type != 'cuda':
         raise ValueError('fp16/bf16 requires a CUDA GPU')
     if precision == 'bf16' and not torch.cuda.is_bf16_supported():
@@ -227,14 +230,14 @@ def autocast(device, precision):
 
 def common_metadata(c, device):
     import transformers
-    return {'training_base_model_source': c['model']['source'], 'training_base_requested_revision': c['model']['revision'], 'torch': torch.__version__, 'transformers': transformers.__version__, 'python': sys.version, 'device': str(device), 'gpu': torch.cuda.get_device_name(0) if device.type == 'cuda' else None, 'seed': c['training']['seed']}
+    return {'training_base_model_source': c['train']['model_source'], 'training_base_requested_revision': c['train']['model_revision'], 'torch': torch.__version__, 'transformers': transformers.__version__, 'python': sys.version, 'device': str(device), 'gpu': torch.cuda.get_device_name(0) if device.type == 'cuda' else None, 'seed': c['train']['seed']}
 
 
 def make_loader(rows, tokenizer, c, labels=None, shuffle=False, batch_size=None):
     from transformers import DataCollatorWithPadding
     data = c['data']
     ds = TextDataset(rows, tokenizer, data['text_column'], data['max_length'], labels, data['label_column'])
-    return DataLoader(ds, batch_size=batch_size or c['training']['batch_size'], shuffle=shuffle, collate_fn=DataCollatorWithPadding(tokenizer))
+    return DataLoader(ds, batch_size=batch_size or c['train']['batch_size'], shuffle=shuffle, collate_fn=DataCollatorWithPadding(tokenizer))
 
 
 def select_task(reference, opts, requested):
@@ -254,7 +257,7 @@ def select_task(reference, opts, requested):
 
 
 def prompt_for(c, text):
-    return c.get('generation', {}).get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:').format(text=text)
+    return c['data'].get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:').format(text=text)
 
 
 class GenerativeDataset(Dataset):
@@ -295,15 +298,16 @@ def make_generative_loader(rows, tokenizer, c, task, model, shuffle=False):
             width = batch['input_ids'].shape[1]
             batch['labels'] = torch.tensor([v + [-100] * (width - len(v)) for v in labels], dtype=torch.long)
             return batch
-    return DataLoader(ds, batch_size=c['training']['batch_size'], shuffle=shuffle, collate_fn=collator)
+    return DataLoader(ds, batch_size=c['train']['batch_size'], shuffle=shuffle, collate_fn=collator)
 
 
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
-    data, settings = c['data'], c['training']
+    data, settings = c['data'], c['train']
     model_dir = WEIGHTS_ROOT / validate_model_name(settings['output_model_name'])
     if model_dir.exists():
         raise FileExistsError(f'Trained model directory already exists: {model_dir}; choose a different output_model_name')
+    LOG.info('Reading training data: %s', data['train_csv'])
     _, rows = read_csv(data['train_csv'], data['text_column'], data['label_column'])
     classes = sorted({r[data['label_column']].strip() for r in rows})
     labels = None
@@ -317,9 +321,9 @@ def train(c, out, device):
     random.seed(seed)
     torch.manual_seed(seed)
     if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
-    repo, opts = resolve_model_source(c['model']['source'], c['model']['revision'], c['model']['cache_dir'])
-    opts['trust_remote_code'] = c['model'].get('trust_remote_code', False)
-    task = select_task(repo, opts, c['model'].get('task', 'auto'))
+    repo, opts = resolve_model_source(c['train']['model_source'], c['train']['model_revision'], c['train']['cache_dir'])
+    opts['trust_remote_code'] = c['train'].get('trust_remote_code', False)
+    task = select_task(repo, opts, c['train'].get('task', 'auto'))
     LOG.info('Loading training model %s (task: %s)', repo, task)
     if task == 'classification':
         if len(classes) != 2 or data['positive_label'] not in classes:
@@ -347,7 +351,9 @@ def train(c, out, device):
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=steps)
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda' and settings['precision'] == 'fp16'))
     optimizer.zero_grad(set_to_none=True)
+    LOG.info('Starting training: %d records, %d batches per epoch, %d epochs', len(rows), len(loader), settings['epochs'])
     for epoch in range(settings['epochs']):
+        LOG.info('Epoch %d/%d started', epoch + 1, settings['epochs'])
         model.train()
         total_loss = 0.0
         for i, batch in enumerate(loader):
@@ -366,6 +372,8 @@ def train(c, out, device):
                 scaler.update()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
+            if i == 0 or (i + 1) % settings.get('progress_every', 1) == 0 or i + 1 == len(loader):
+                LOG.info('Epoch %d/%d batch %d/%d loss %.6f', epoch + 1, settings['epochs'], i + 1, len(loader), loss.item())
         LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
     if evaluation and task != 'classification':
         LOG.info('Labeled evaluation metrics are not implemented for generative models')
@@ -421,7 +429,7 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
         settings['decoder_start_token_id'] = model.generation_config.decoder_start_token_id
         settings['bos_token_id'] = model.generation_config.bos_token_id
     gen = GenerationConfig(**settings)
-    seed = c['training']['seed']
+    seed = c['train']['seed']
     random.seed(seed)
     torch.manual_seed(seed)
     if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
@@ -432,7 +440,7 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
         for offset in range(0, len(rows), size):
             group = rows[offset:offset + size]
             inputs = tokenizer([prompt_for(c, r[c['data']['text_column']]) for r in group], padding=True, truncation=True, max_length=c['data']['max_length'], return_tensors='pt').to(device)
-            with autocast(device, c['training']['precision']):
+            with autocast(device, c['train']['precision']):
                 generated = model.generate(**inputs, generation_config=gen)
             if task == 'causal_lm': generated = generated[:, inputs['input_ids'].shape[1]:]
             outputs = tokenizer.batch_decode(generated, skip_special_tokens=True)
@@ -448,7 +456,7 @@ def predict(c, out, device, model_source):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     data = c['data']
     fields, rows = read_csv(data['inference_csv'], data['text_column'])
-    reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['model']['cache_dir'])
+    reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['inference']['cache_dir'])
     opts['trust_remote_code'] = c['inference'].get('trust_remote_code', False)
     task = select_task(reference, opts, c['inference'].get('task', 'auto'))
     tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
@@ -484,7 +492,7 @@ def predict(c, out, device, model_source):
         writer = csv.DictWriter(f, fieldnames=fields + extra)
         writer.writeheader()
         for batch in loader:
-            with autocast(device, c['training']['precision']):
+            with autocast(device, c['train']['precision']):
                 logits = model(**{k: v.to(device) for k, v in batch.items()}).logits
             probs = torch.softmax(logits.float(), dim=-1)[:, positive].cpu().tolist()
             for prob in probs:
@@ -517,7 +525,7 @@ def main(forced_action=None):
         c = read_config(args.config, getattr(args, 'train_csv', None))
         device = configure_device(c)
         if args.action == 'check':
-            print(f'Configuration valid. Device: {device}; model: {c["model"]["source"]}; cache: {c["model"]["cache_dir"]}')
+            print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
         if args.action == 'predict':
             args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')
@@ -525,7 +533,7 @@ def main(forced_action=None):
                 raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
         out = setup_run(c, args.action)
         try:
-            LOG.info('Device: %s', device)
+            LOG.info('Device: %s%s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)')
             if args.action == 'train': train(c, out, device)
             else: predict(c, out, device, args.model_dir)
             (out / 'COMPLETE').write_text('Completed successfully.\n')
