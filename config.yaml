@@ -1,6 +1,7 @@
 model:
   # Hugging Face repository ID/URL, local:Model-1, or /workspace/fine-tuned-weights/Model-1
   source: FacebookAI/xlm-roberta-base
+  task: auto  # auto, classification, causal_lm, or seq2seq
   revision: main  # Pin a commit hash for reproducible runs.
   cache_dir: /tmp/phishing-detect-hf-cache  # Pod-local disk, not /workspace.
 data:
@@ -29,5 +30,12 @@ inference:
   positive_label_index: null  # Optional 0 or 1 when model labels do not name the positive class.
   model_dir: null  # Set to the fine-tuned model directory.
   batch_size: 16
-  threshold: 0.5  # Positive class probability threshold.
+  threshold: 0.5  # Classifier probability threshold.
+  max_new_tokens: 32
+  do_sample: false
+  temperature: 0.7  # Used only when do_sample is true.
+  top_p: 0.9
+# Shared prompt used for language-model fine-tuning and inference.
+generation:
+  prompt_template: "Classify the following text as phishing or legitimate.\nText: {text}\nLabel:"
 output_dir: /workspace/phishing-detect-output

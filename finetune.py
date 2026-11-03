@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fine-tune and run a Hugging Face binary sequence classifier on CSV data."""
+"""Fine-tune and run Hugging Face text models on CSV data."""
 import argparse
 from contextlib import nullcontext
 import csv
@@ -81,6 +81,17 @@ def read_config(path, train_csv_override=None):
     for key in ('revision', 'cache_dir'):
         if not isinstance(c['model'].get(key), str) or not c['model'][key].strip():
             raise ValueError(f'model.{key} must be a nonempty string')
+    for section in ('model', 'inference'):
+        if c[section].get('task', 'auto') not in ('auto', 'classification', 'causal_lm', 'seq2seq'):
+            raise ValueError(f'{section}.task must be auto, classification, causal_lm, or seq2seq')
+    generation = c.get('generation', {})
+    template = generation.get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:')
+    try:
+        if not isinstance(template, str) or '{text}' not in template:
+            raise ValueError('generation.prompt_template must include {text}')
+        template.format(text='sample')
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError('generation.prompt_template must contain only a valid {text} placeholder') from exc
     if train_csv_override is not None:
         c['data']['train_csv'] = train_csv_override
     for key in ('train_csv', 'inference_csv', 'text_column', 'label_column', 'positive_label'):
@@ -122,6 +133,15 @@ def read_config(path, train_csv_override=None):
     threshold = c['inference'].get('threshold')
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError('inference.threshold must be between 0 and 1')
+    inf = c['inference']
+    if not isinstance(inf.get('do_sample', False), bool):
+        raise ValueError('inference.do_sample must be boolean')
+    if isinstance(inf.get('max_new_tokens', 32), bool) or not isinstance(inf.get('max_new_tokens', 32), int) or inf.get('max_new_tokens', 32) < 1:
+        raise ValueError('inference.max_new_tokens must be a positive integer')
+    for key, upper in [('temperature', None), ('top_p', 1)]:
+        value = inf.get(key, 0.7 if key == 'temperature' else 0.9)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or (upper is not None and value > upper):
+            raise ValueError(f'inference.{key} must be positive' + (' and at most 1' if upper else ''))
     if not isinstance(c.get('output_dir'), str) or not c['output_dir'].strip():
         raise ValueError('output_dir must be a nonempty path')
     return c
@@ -215,6 +235,67 @@ def make_loader(rows, tokenizer, c, labels=None, shuffle=False, batch_size=None)
     return DataLoader(ds, batch_size=batch_size or c['training']['batch_size'], shuffle=shuffle, collate_fn=DataCollatorWithPadding(tokenizer))
 
 
+def select_task(reference, opts, requested):
+    if requested != 'auto':
+        return requested
+    from transformers import AutoConfig
+    config = AutoConfig.from_pretrained(reference, **opts)
+    saved = getattr(config, 'phishing_task', None)
+    if saved in ('classification', 'causal_lm', 'seq2seq'):
+        return saved
+    if config.is_encoder_decoder:
+        return 'seq2seq'
+    architectures = ' '.join(config.architectures or []).lower()
+    if any(name in architectures for name in ('causallm', 'lmheadmodel', 'conditionalgeneration')):
+        return 'causal_lm'
+    return 'classification'
+
+
+def prompt_for(c, text):
+    return c.get('generation', {}).get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:').format(text=text)
+
+
+class GenerativeDataset(Dataset):
+    def __init__(self, rows, tokenizer, c, task):
+        self.rows, self.tokenizer, self.c, self.task = rows, tokenizer, c, task
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, i):
+        row = self.rows[i]
+        data, tok = self.c['data'], self.tokenizer
+        prompt = prompt_for(self.c, row[data['text_column']])
+        target = row[data['label_column']].strip()
+        limit = data['max_length']
+        if self.task == 'seq2seq':
+            inputs = dict(tok(prompt, truncation=True, max_length=limit))
+            inputs['labels'] = tok(text_target=target, truncation=True, max_length=limit)['input_ids']
+            return inputs
+        target_ids = tok(target, add_special_tokens=False)['input_ids']
+        if tok.eos_token_id is not None:
+            target_ids += [tok.eos_token_id]
+        if not target_ids or len(target_ids) >= limit:
+            raise ValueError('Label is empty or too long for data.max_length')
+        prompt_ids = tok(prompt, add_special_tokens=True, truncation=True, max_length=limit - len(target_ids))['input_ids']
+        return {'input_ids': prompt_ids + target_ids, 'attention_mask': [1] * (len(prompt_ids) + len(target_ids)), 'labels': [-100] * len(prompt_ids) + target_ids}
+
+
+def make_generative_loader(rows, tokenizer, c, task, model, shuffle=False):
+    from transformers import DataCollatorForSeq2Seq
+    ds = GenerativeDataset(rows, tokenizer, c, task)
+    if task == 'seq2seq':
+        collator = DataCollatorForSeq2Seq(tokenizer, model=model, label_pad_token_id=-100)
+    else:
+        def collator(items):
+            labels = [item.pop('labels') for item in items]
+            batch = tokenizer.pad(items, padding=True, return_tensors='pt')
+            width = batch['input_ids'].shape[1]
+            batch['labels'] = torch.tensor([v + [-100] * (width - len(v)) for v in labels], dtype=torch.long)
+            return batch
+    return DataLoader(ds, batch_size=c['training']['batch_size'], shuffle=shuffle, collate_fn=collator)
+
+
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['training']
@@ -223,14 +304,11 @@ def train(c, out, device):
         raise FileExistsError(f'Trained model directory already exists: {model_dir}; choose a different output_model_name')
     _, rows = read_csv(data['train_csv'], data['text_column'], data['label_column'])
     classes = sorted({r[data['label_column']].strip() for r in rows})
-    if len(classes) != 2 or data['positive_label'] not in classes:
-        raise ValueError(f'Training labels must contain exactly two classes including positive_label; found {classes}')
-    negative = next(x for x in classes if x != data['positive_label'])
-    labels = {negative: 0, data['positive_label']: 1}
+    labels = None
     evaluation = None
     if data.get('eval_csv'):
         _, evaluation = read_csv(data['eval_csv'], data['text_column'], data['label_column'])
-        unknown = {r[data['label_column']].strip() for r in evaluation} - set(labels)
+        unknown = {r[data['label_column']].strip() for r in evaluation} - set(classes)
         if unknown:
             raise ValueError(f'Evaluation CSV has labels absent from training: {sorted(unknown)}')
     seed = settings['seed']
@@ -238,16 +316,28 @@ def train(c, out, device):
     torch.manual_seed(seed)
     if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
     repo, opts = resolve_model_source(c['model']['source'], c['model']['revision'], c['model']['cache_dir'])
-    LOG.info('Loading training model %s', repo)
+    task = select_task(repo, opts, c['model'].get('task', 'auto'))
+    LOG.info('Loading training model %s (task: %s)', repo, task)
+    if task == 'classification':
+        if len(classes) != 2 or data['positive_label'] not in classes:
+            raise ValueError(f'Classifier training requires exactly two classes including positive_label; found {classes}')
+        negative = next(x for x in classes if x != data['positive_label'])
+        labels = {negative: 0, data['positive_label']: 1}
     tokenizer = AutoTokenizer.from_pretrained(repo, **opts)
     if tokenizer.pad_token is None:
         if tokenizer.eos_token is None:
             raise ValueError('Model tokenizer has no padding or EOS token; choose a compatible sequence-classification model')
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForSequenceClassification.from_pretrained(repo, num_labels=2, id2label={0: negative, 1: data['positive_label']}, label2id=labels, **opts)
+    if task == 'classification':
+        model = AutoModelForSequenceClassification.from_pretrained(repo, num_labels=2, id2label={0: negative, 1: data['positive_label']}, label2id=labels, **opts)
+    else:
+        from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
+        cls = AutoModelForCausalLM if task == 'causal_lm' else AutoModelForSeq2SeqLM
+        model = cls.from_pretrained(repo, **opts)
+    model.config.phishing_task = task
     model.config.pad_token_id = tokenizer.pad_token_id
     model.to(device)
-    loader = make_loader(rows, tokenizer, c, labels, shuffle=True)
+    loader = make_loader(rows, tokenizer, c, labels, shuffle=True) if task == 'classification' else make_generative_loader(rows, tokenizer, c, task, model, shuffle=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=settings['learning_rate'], weight_decay=settings['weight_decay'])
     accum = settings['gradient_accumulation_steps']
     steps = math.ceil(len(loader) / accum) * settings['epochs']
@@ -274,7 +364,9 @@ def train(c, out, device):
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
         LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
-    if evaluation:
+    if evaluation and task != 'classification':
+        LOG.info('Labeled evaluation metrics are not implemented for generative models')
+    if evaluation and task == 'classification':
         correct = total = 0
         model.eval()
         with torch.inference_mode():
@@ -295,7 +387,7 @@ def train(c, out, device):
         shutil.rmtree(model_dir)
         raise
     metadata = common_metadata(c, device)
-    metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'labels': labels, 'trained_model_dir': str(model_dir), 'training_csv_sha256': sha256(data['train_csv']), 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
+    metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'task': task, 'labels': labels if labels is not None else classes, 'trained_model_dir': str(model_dir), 'training_csv_sha256': sha256(data['train_csv']), 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     LOG.info('Saved trained model to %s', model_dir)
 
