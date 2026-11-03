@@ -1,6 +1,6 @@
 model:
   # Hugging Face repository ID or https://huggingface.co/<owner>/<model>
-  source: distilbert/distilbert-base-uncased
+  source: FacebookAI/xlm-roberta-base
   revision: main  # Pin a commit hash for reproducible runs.
   cache_dir: /tmp/phishing-detect-hf-cache  # Pod-local disk, not /workspace.
 data:
@@ -21,7 +21,6 @@ training:
   seed: 42
   precision: fp32  # fp32, fp16, or bf16 (mixed precision requires CUDA)
 inference:
-  model_dir: null  # Set to the model/ directory produced by fine-tuning.
   batch_size: 16
   threshold: 0.5  # Positive class probability threshold.
 output_dir: /workspace/phishing-detect-output
