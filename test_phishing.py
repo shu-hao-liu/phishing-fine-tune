@@ -30,6 +30,14 @@ class PhishingTests(unittest.TestCase):
         (self.root / 'train' / 'train.csv').write_text('text,label\nclick now,phishing\nhello friend,legitimate\nverify now,phishing\n')
         (self.root / 'infer' / 'data.csv').write_text('text,id\nhello friend,1\nclick now,2\n')
 
+    def test_three_config_sections_and_device_selection(self):
+        self.assertEqual(set(self.c), {'train', 'data', 'inference'})
+        self.c['train']['precision'] = 'fp32'
+        with patch.object(torch.cuda, 'is_available', return_value=True):
+            self.assertEqual(p.configure_device(self.c).type, 'cuda')
+        with patch.object(torch.cuda, 'is_available', return_value=False):
+            self.assertEqual(p.configure_device(self.c).type, 'cpu')
+
     def test_url_parsing(self):
         self.assertEqual(p.repository_id('https://huggingface.co/example/model/'), 'example/model')
         with self.assertRaises(ValueError): p.repository_id('https://example.com/model')

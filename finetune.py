@@ -26,16 +26,16 @@ LOG = logging.getLogger('phishing')
 
 def repository_id(source):
     if not isinstance(source, str) or not source.strip():
-        raise ValueError('model.source must be a Hugging Face URL or repository ID')
+        raise ValueError('Model source must be a Hugging Face URL or repository ID')
     source = source.strip()
     if '://' in source:
         u = urlparse(source)
         if u.scheme != 'https' or u.netloc.lower() not in ('huggingface.co', 'www.huggingface.co') or u.query or u.fragment:
-            raise ValueError('model.source URL must be an HTTPS Hugging Face model page')
+            raise ValueError('Model source URL must be an HTTPS Hugging Face model page')
         source = u.path.strip('/')
     parts = source.split('/')
     if len(parts) not in (1, 2) or any(not p or p in ('.', '..') for p in parts):
-        raise ValueError('Use a model repository ID or model page URL; put the revision in model.revision')
+        raise ValueError('Use a model repository ID or model page URL; set the model revision separately')
     return source
 
 
