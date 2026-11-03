@@ -16,3 +16,7 @@ __pycache__/
 *.pem
 *.key
 .auto-commit-test-*/
+
+# Temporary split files may contain dataset records.
+.split-train-*
+.split-inference-*
