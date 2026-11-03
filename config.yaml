@@ -4,7 +4,7 @@ model:
   revision: main  # Pin a commit hash for reproducible runs.
   cache_dir: /tmp/phishing-detect-hf-cache  # Pod-local disk, not /workspace.
 data:
-  train_csv: /workspace/phishing-data/train/train.csv
+  train_csv: training.csv  # Upload this file to the project folder.
   inference_csv: /workspace/phishing-data/inference/inference.csv
   eval_csv: null  # Optional separate labeled CSV; never used for training.
   text_column: text

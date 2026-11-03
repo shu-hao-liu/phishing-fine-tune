@@ -7,7 +7,7 @@ from unittest.mock import patch
 import torch
 import yaml
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, DistilBertTokenizerFast, DistilBertConfig
-import phishing as p
+import finetune as p
 
 
 class PhishingTests(unittest.TestCase):
