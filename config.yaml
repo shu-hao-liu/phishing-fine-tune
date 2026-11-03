@@ -2,6 +2,7 @@ model:
   # Hugging Face repository ID/URL, local:Model-1, or /workspace/fine-tuned-weights/Model-1
   source: FacebookAI/xlm-roberta-base
   task: auto  # auto, classification, causal_lm, or seq2seq
+  trust_remote_code: false  # Only enable for repositories whose code you trust.
   revision: main  # Pin a commit hash for reproducible runs.
   cache_dir: /tmp/phishing-detect-hf-cache  # Pod-local disk, not /workspace.
 data:

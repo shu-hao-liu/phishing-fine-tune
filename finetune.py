@@ -82,6 +82,8 @@ def read_config(path, train_csv_override=None):
         if not isinstance(c['model'].get(key), str) or not c['model'][key].strip():
             raise ValueError(f'model.{key} must be a nonempty string')
     for section in ('model', 'inference'):
+        if not isinstance(c[section].get('trust_remote_code', False), bool):
+            raise ValueError(f'{section}.trust_remote_code must be boolean')
         if c[section].get('task', 'auto') not in ('auto', 'classification', 'causal_lm', 'seq2seq'):
             raise ValueError(f'{section}.task must be auto, classification, causal_lm, or seq2seq')
     generation = c.get('generation', {})
@@ -316,6 +318,7 @@ def train(c, out, device):
     torch.manual_seed(seed)
     if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
     repo, opts = resolve_model_source(c['model']['source'], c['model']['revision'], c['model']['cache_dir'])
+    opts['trust_remote_code'] = c['model'].get('trust_remote_code', False)
     task = select_task(repo, opts, c['model'].get('task', 'auto'))
     LOG.info('Loading training model %s (task: %s)', repo, task)
     if task == 'classification':
@@ -410,7 +413,7 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
     inf = c['inference']
     settings = {'do_sample': inf.get('do_sample', False), 'max_new_tokens': inf.get('max_new_tokens', 32), 'pad_token_id': tokenizer.pad_token_id}
     if settings['do_sample']:
-        settings.update(temperature=inf.get('temperature', 0.7), top_p=inf.get('top_p', 0.9))
+        settings.update(temperature=inf.get('temperature', 0.7), top_p=inf.get('top_p', 0.9), top_k=0)
     # Use a fresh configuration rather than inheriting model-specific sampling defaults.
     from transformers import GenerationConfig
     settings['eos_token_id'] = model.generation_config.eos_token_id
@@ -445,14 +448,15 @@ def predict(c, out, device, model_source):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     data = c['data']
     fields, rows = read_csv(data['inference_csv'], data['text_column'])
-    extra = ['predicted_label', 'phishing_probability']
-    if any(x in fields for x in extra):
-        raise ValueError(f'Inference CSV already contains an output column: {extra}')
     reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['model']['cache_dir'])
+    opts['trust_remote_code'] = c['inference'].get('trust_remote_code', False)
     task = select_task(reference, opts, c['inference'].get('task', 'auto'))
     tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
     if task != 'classification':
         return predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task)
+    extra = ['predicted_label', 'phishing_probability']
+    if any(x in fields for x in extra):
+        raise ValueError(f'Inference CSV already contains an output column: {extra}')
     model, loading_info = AutoModelForSequenceClassification.from_pretrained(reference, output_loading_info=True, **opts)
     if loading_info['missing_keys'] or loading_info['mismatched_keys'] or loading_info['error_msgs']:
         raise ValueError('Inference model did not load all classifier weights; choose an already trained binary classifier')
