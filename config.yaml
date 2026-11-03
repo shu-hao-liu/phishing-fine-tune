@@ -12,7 +12,7 @@ data:
   positive_label: phishing
   max_length: 512
 training:
-  output_model_name: Model-1  # Saved to /workspace/fine-tuned-weights/Model-1; must not already exist.
+  output_model_name: Original  # Saved to /workspace/fine-tuned-weights/Model-1; must not already exist.
   epochs: 3
   learning_rate: 0.00002
   batch_size: 8
@@ -24,7 +24,7 @@ training:
 inference:
   # Inference model: HF repository ID/URL, local:Model-1, or /workspace/fine-tuned-weights/Model-1.
   # Leave null and set model_dir below to use an existing local model.
-  model_source: null
+  model_source: Original
   model_revision: main
   positive_label_index: null  # Optional 0 or 1 when model labels do not name the positive class.
   model_dir: null  # Set to the fine-tuned model directory.
