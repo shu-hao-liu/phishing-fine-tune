@@ -1,0 +1,26 @@
+model:
+  # Hugging Face repository ID or https://huggingface.co/<owner>/<model>
+  source: distilbert/distilbert-base-uncased
+  revision: main  # Pin a commit hash for reproducible runs.
+  cache_dir: /tmp/phishing-detect-hf-cache  # Pod-local disk, not /workspace.
+data:
+  train_csv: /workspace/phishing-data/train/train.csv
+  inference_csv: /workspace/phishing-data/inference/inference.csv
+  eval_csv: null  # Optional separate labeled CSV; never used for training.
+  text_column: text
+  label_column: label
+  positive_label: phishing
+  max_length: 512
+training:
+  epochs: 3
+  learning_rate: 0.00002
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  seed: 42
+  precision: fp32  # fp32, fp16, or bf16 (mixed precision requires CUDA)
+inference:
+  batch_size: 16
+  threshold: 0.5  # Positive class probability threshold.
+output_dir: /workspace/phishing-detect-output

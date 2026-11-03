@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.csv
+# Local data, checkpoints, and credentials should not be published.
+*.tsv
+*.jsonl
+*.parquet
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.pem
+*.key
