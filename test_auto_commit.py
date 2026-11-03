@@ -58,6 +58,13 @@ class AutoCommitTests(unittest.TestCase):
         self.git('add', 'other.txt')
         with self.assertRaisesRegex(RuntimeError, 'Staged changes'): worker.sync()
 
+    def test_transient_git_lock_is_retried(self):
+        locked = subprocess.CompletedProcess(['git'], 128, '', 'index.lock: File exists')
+        success = subprocess.CompletedProcess(['git'], 0, 'ok', '')
+        with patch.object(a.subprocess, 'run', side_effect=[locked, success]) as run, patch.object(a.time, 'sleep'):
+            self.assertEqual(a.git('status').stdout, 'ok')
+            self.assertEqual(run.call_count, 2)
+
     def test_multiple_instances_are_rejected(self):
         with a.instance_lock():
             with self.assertRaisesRegex(RuntimeError, 'already running'):

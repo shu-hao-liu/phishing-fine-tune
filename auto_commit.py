@@ -17,8 +17,19 @@ ROOT = Path(__file__).resolve().parent
 def git(*args, check=True):
     env = os.environ.copy()
     env['GIT_TERMINAL_PROMPT'] = '0'
-    return subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True,
-                          check=check, env=env, timeout=60)
+    command = ['git', '-C', str(ROOT), *args]
+    for attempt in range(5):
+        result = subprocess.run(command, capture_output=True, text=True, check=False, env=env, timeout=60)
+        transient_lock = result.returncode != 0 and (
+            ('index.lock' in result.stderr and 'File exists' in result.stderr)
+            or ('cannot lock ref' in result.stderr and 'expected' in result.stderr)
+        )
+        if transient_lock and attempt < 4:
+            time.sleep(0.5)
+            continue
+        if check:
+            result.check_returncode()
+        return result
 
 
 def index_fingerprint():
