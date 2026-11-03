@@ -414,6 +414,9 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
     # Use a fresh configuration rather than inheriting model-specific sampling defaults.
     from transformers import GenerationConfig
     settings['eos_token_id'] = model.generation_config.eos_token_id
+    if task == 'seq2seq':
+        settings['decoder_start_token_id'] = model.generation_config.decoder_start_token_id
+        settings['bos_token_id'] = model.generation_config.bos_token_id
     gen = GenerationConfig(**settings)
     seed = c['training']['seed']
     random.seed(seed)

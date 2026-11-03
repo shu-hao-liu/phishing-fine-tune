@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import torch
 import yaml
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, DistilBertTokenizerFast, DistilBertConfig
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, DistilBertTokenizerFast, DistilBertConfig, GPT2Config, T5Config, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 import finetune as p
 
 
@@ -45,6 +45,40 @@ class PhishingTests(unittest.TestCase):
         bad = self.root / 'bad.csv'
         bad.write_text('text,label\n,phishing\n')
         with self.assertRaisesRegex(ValueError, 'missing text'): p.read_csv(bad, 'text', 'label')
+
+    def test_generative_models_train_and_predict(self):
+        vocab = self.root / 'vocab.txt'
+        vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\nphishing\nlegitimate\n')
+        tokenizer = DistilBertTokenizerFast(vocab_file=str(vocab))
+        self.c['data']['max_length'] = 16
+        self.c['generation'] = {'prompt_template': '{text}'}
+        self.c['inference'].update(max_new_tokens=2, do_sample=False)
+        for task in ('causal_lm', 'seq2seq'):
+            with self.subTest(task=task):
+                base = self.root / ('base-' + task)
+                base.mkdir()
+                tokenizer.save_pretrained(base)
+                if task == 'causal_lm':
+                    cfg = GPT2Config(vocab_size=len(tokenizer), n_positions=32, n_ctx=32, n_embd=16, n_layer=1, n_head=2, bos_token_id=tokenizer.cls_token_id, eos_token_id=tokenizer.sep_token_id, pad_token_id=tokenizer.pad_token_id)
+                    model = AutoModelForCausalLM.from_config(cfg)
+                else:
+                    cfg = T5Config(vocab_size=len(tokenizer), d_model=16, d_ff=32, num_layers=1, num_decoder_layers=1, num_heads=2, decoder_start_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.sep_token_id, pad_token_id=tokenizer.pad_token_id)
+                    model = AutoModelForSeq2SeqLM.from_config(cfg)
+                model.save_pretrained(base)
+                self.c['model'].update(source=str(base), task=task)
+                self.c['training']['output_model_name'] = task
+                self.c['inference']['task'] = 'auto'
+                run = self.root / ('run-' + task)
+                run.mkdir()
+                p.train(self.c, run, torch.device('cpu'))
+                out = self.root / ('pred-' + task)
+                out.mkdir()
+                p.predict(self.c, out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task))
+                with (out / 'predictions.csv').open(newline='') as f:
+                    rows = list(csv.DictReader(f))
+                self.assertEqual(len(rows), 2)
+                self.assertIn('model_response', rows[0])
+                self.assertEqual(json.loads((out / 'metadata.json').read_text())['task'], task)
 
     def test_training_and_inference_offline(self):
         vocab = self.root / 'vocab.txt'
