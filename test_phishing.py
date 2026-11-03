@@ -13,7 +13,7 @@ import finetune as p
 
 class PhishingTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=p.ROOT)
+        self.temp = tempfile.TemporaryDirectory(prefix='.auto-commit-test-', dir=p.ROOT)
         self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
         self.weights_patch = patch.object(p, 'WEIGHTS_ROOT', self.root / 'weights')
@@ -67,6 +67,11 @@ class PhishingTests(unittest.TestCase):
         self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.WEIGHTS_ROOT / 'Model-1').resolve()))
         with self.assertRaises(FileExistsError):
             p.train(self.c, train_dir, torch.device('cpu'))
+        # Train again from the already saved local weights, with no Hub download.
+        self.c['model']['source'] = 'local:Model-1'
+        self.c['training']['output_model_name'] = 'Model-2'
+        p.train(self.c, train_dir, torch.device('cpu'))
+        self.assertTrue((p.WEIGHTS_ROOT / 'Model-2' / 'config.json').exists())
 
         # A separately selected Hub classifier can use a different positive index.
         model.config.id2label = {0: 'phishing', 1: 'legitimate'}
