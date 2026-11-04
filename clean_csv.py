@@ -74,7 +74,7 @@ def clean(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('files', nargs='*', default=[str(ROOT / 'data' / 'train.csv'), str(ROOT / 'data' / 'inference.csv')], help='CSV files to clean (default: data/train.csv and data/inference.csv)')
+    parser.add_argument('files', nargs='*', default=[str(ROOT / 'data' / name) for name in ('train.csv', 'validation.csv', 'test.csv')], help='CSV files to clean (default: data/train.csv, data/validation.csv, and data/test.csv)')
     args = parser.parse_args()
     try:
         for name in args.files:
