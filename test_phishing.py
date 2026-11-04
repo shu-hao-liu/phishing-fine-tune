@@ -28,7 +28,7 @@ class PhishingTests(unittest.TestCase):
         for name in ('train', 'infer'):
             (self.root / name).mkdir()
         (self.root / 'train' / 'train.csv').write_text('text,label\nclick now,phishing\nhello friend,legitimate\nverify now,phishing\n')
-        (self.root / 'infer' / 'data.csv').write_text('text,id\nhello friend,1\nclick now,2\n')
+        (self.root / 'infer' / 'data.csv').write_text('text,id,label\nhello friend,1,legitimate\nclick now,2,phishing\n')
 
     def test_three_config_sections_and_device_selection(self):
         self.assertEqual(set(self.c), {'train', 'data', 'inference'})
@@ -129,6 +129,8 @@ class PhishingTests(unittest.TestCase):
         p.predict(self.c, pred_dir, torch.device('cpu'), str(p.WEIGHTS_ROOT / 'Model-1'))
         with (pred_dir / 'predictions.csv').open(newline='') as f: rows = list(csv.DictReader(f))
         self.assertEqual([r['id'] for r in rows], ['1', '2'])
+        p.save_prediction_metrics(self.c, pred_dir)
+        self.assertEqual(json.loads((pred_dir / 'metrics.json').read_text())['count'], 2)
         self.assertTrue(all(r['predicted_label'] in ('legitimate', 'phishing') and 0 <= float(r['phishing_probability']) <= 1 for r in rows))
         self.assertTrue((p.WEIGHTS_ROOT / 'Model-1' / 'config.json').exists())
         self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.WEIGHTS_ROOT / 'Model-1').resolve()))
