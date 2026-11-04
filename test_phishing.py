@@ -119,11 +119,17 @@ class PhishingTests(unittest.TestCase):
         model_cfg.id2label = {0: 'legitimate', 1: 'phishing'}
         model_cfg.label2id = {'legitimate': 0, 'phishing': 1}
         model = AutoModelForSequenceClassification.from_config(model_cfg)
+        validation = self.root / 'validation.csv'
+        validation.write_text('text,label\nhello friend,legitimate\nclick now,phishing\n')
+        self.c['data']['eval_csv'] = str(validation)
         train_dir = self.root / 'trained'
         train_dir.mkdir()
         p.setup_run(self.c, 'test')
         with patch.object(AutoTokenizer, 'from_pretrained', return_value=tokenizer), patch.object(AutoModelForSequenceClassification, 'from_pretrained', return_value=model):
             p.train(self.c, train_dir, torch.device('cpu'))
+        validation_metrics = json.loads((train_dir / 'evaluation.json').read_text())
+        self.assertEqual(validation_metrics['count'], 2)
+        self.assertTrue({'accuracy', 'precision', 'recall', 'f1'} <= set(validation_metrics))
         pred_dir = self.root / 'predicted'
         pred_dir.mkdir()
         p.predict(self.c, pred_dir, torch.device('cpu'), str(p.WEIGHTS_ROOT / 'Model-1'))
