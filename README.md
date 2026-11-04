@@ -1,110 +1,85 @@
-# Phishing detection: fine-tuning and inference
+# Phishing model training
 
-Fine-tune Hugging Face text models on a labeled CSV and run inference on a separate CSV. The scripts support sequence classifiers, causal language models, and encoder-decoder language models through Transformers. Set each model's repository ID or model-page link in `config.yaml`. Hardware capacity, access, model licenses, tokenizer/model compatibility, and the architecture support provided by Transformers still apply; not every model or modality can be used with this text CSV workflow.
+The project has one configuration file and one folder for CSV files:
 
-## Run on a Runpod GPU Pod
-
-1. Start a GPU Pod with a Python environment, CUDA-compatible PyTorch support, and writable `/workspace` storage. A PyTorch Pod template with a terminal is convenient. Transfer this project folder to the Pod. Pick sufficient GPU memory for the model, optimizer and batch size; start with a small model and reduce batch size if necessary. Provision adequate **container disk** for PyTorch and downloaded weights, plus enough `/workspace` storage for datasets and full model checkpoints. Disk and VRAM needs vary by model and dataset and have not been measured here.
-2. From a terminal in the transferred project folder:
-
-   ```bash
-   python3 -m pip install -r requirements.txt
-   python3 finetune.py --check
-   ```
-
-3. Upload the labeled training CSV to the project folder as `train.csv`. By default, validation is `data/validation.csv` and the separate test set is `data/test.csv`. The files must exist; the program never creates or invents examples. Optional evaluation data may be specified separately. Training and inference CSVs must be in different directories.
-4. Edit `config.yaml`, in particular `train.model_source`, `data.*` column names and paths, and `data.positive_label`. For a Hugging Face source, use a model commit hash as `train.model_revision` for reproducibility. The default `main` is a moving revision; the resolved commit is recorded when available. Model weights and tokenizer files download into `train.cache_dir` (default `/tmp/phishing-detect-hf-cache`) on the Pod's local container storage and are reused while that cache remains available. The default cache is not persistent across Pod replacement. Set `HF_TOKEN` in the Pod environment for a gated model, and accept its license on Hugging Face first; never put tokens in `config.yaml`.
-5. Choose a new folder name in `train.output_model_name` (for example, `Model-1`). Training saves the model and tokenizer to `/workspace/fine-tuned-weights/Model-1`. Existing folders are never overwritten; choose another name for each new run. Train and then use that folder:
-
-   ```bash
-   python3 finetune.py
-   python3 inference.py --model-dir /workspace/fine-tuned-weights/Model-1
-   ```
-
-   Both scripts read the same `config.yaml`. To use a differently named CSV in the project folder, set `data.train_csv` in the config or run `python3 finetune.py --train-csv your-file.csv`. Relative dataset paths resolve from the project folder, regardless of the current working directory. Set `inference.model_source` to `local:Model-1` or `/workspace/fine-tuned-weights/Model-1` to use local weights, or to a Hugging Face repository ID or model-page URL to download and cache that model. You can also set `inference.model_dir` to the local directory. `inference.model_source` takes precedence over `model_dir`; `--model-dir` overrides both. Set `inference.model_revision` independently for a Hub model. For classifier inference the selected model must be an already trained binary sequence classifier; causal and encoder-decoder models generate text instead. If its label mapping does not name the configured positive class, set `inference.positive_label_index` to the correct class index (0 or 1); verify the model card before choosing it. The displayed prediction labels come from the selected inference model. Pass `--config /path/to/config.yaml` to either script to select another shared configuration; `--model-dir` overrides the configured model directory. `finetune.py --check` validates settings and reports the detected device without downloading a model or checking dataset contents. Training reads only the training CSV and optional evaluation CSV; prediction reads the inference CSV and selected model; a Hub model is downloaded into the same local cache if necessary.
-6. Retrieve outputs from `/workspace/phishing-detect-output` and stop the Pod when finished. A running GPU Pod continues to incur charges. Mount persistent storage at `/workspace` if results must survive Pod replacement; the path alone does not guarantee persistence.
-
-An optional `Dockerfile` builds a CUDA/Python image for a Pod. It keeps the container alive without starting an experiment or exposing a terminal service. You must have an appropriate way to execute commands inside the container and supply `/workspace` storage. The image includes the default config; mount or copy a custom config and use `--config` to override it. The image has not been built or tested on Runpod.
-
-To continue fine-tuning a saved local model, set `train.model_source: local:Model-1` (or its full `/workspace/fine-tuned-weights/Model-1` path) and choose a **different** `train.output_model_name`. A Hugging Face repository ID or URL in `train.model_source` downloads the base model into the configured local cache. The same source formats work for `inference.model_source`; `local:` explicitly selects `/workspace/fine-tuned-weights` and never falls back to the Hub.
-
-## Model tasks and generation
-
-`train.task` and `inference.task` are independent: choose `auto`, `classification`, `causal_lm`, or `seq2seq`. Auto uses the model configuration's saved task, encoder-decoder flag, and architecture name; set the task explicitly if the model is detected incorrectly. Local fine-tuned models record their task. Classifier mode uses a two-class prediction head. Causal and encoder-decoder modes train the model to generate the CSV label after the shared `data.prompt_template`; the template must contain `{text}` and is used identically at inference. Review and adapt the prompt for your dataset and model.
-
-For generative inference, configure `max_new_tokens`, `do_sample`, `temperature`, and `top_p` under `inference`. Greedy decoding does not use temperature or top-p. Set `train.trust_remote_code` or `inference.trust_remote_code` only for a repository whose model code you have reviewed and trust; this allows that repository's Python code to run. Models without compatible tokenizer/padding or supported Transformers model classes fail explicitly. Full fine-tuning of large models may exceed GPU memory.
-
-## CSV format
-
-Training requires a text column and nonempty labels. Classifier mode requires exactly two label values, including `data.positive_label`; generative modes train on the label text. For example, with the default column names:
-
-```csv
-body,label
-"Please verify your account via this link",1.0
-"The meeting is at 3 PM",0.0
+```text
+phishing-detect/
+├── config.yaml
+├── finetune.py
+├── inference.py
+├── analyze_results.py
+└── data/
+    ├── train.csv
+    ├── validation.csv
+    ├── test.csv
+    ├── inference.csv                 # original before the validation/test split
+    └── *.original.csv, *.before-empty-removal.csv  # backups
 ```
 
-Inference requires the text column; other columns are preserved in the predictions file:
+`data/` also receives prediction CSVs. Other scripts in the project are utilities and tests. CSV files are excluded from Git, so upload the `data/` folder to the Pod separately.
 
-```csv
-body,id
-"Your account needs verification",123
-"See you at the meeting",124
-```
+## Train
 
-Set `data.eval_csv` to a different labeled file to report classifier validation accuracy, precision, recall, and F1. It is never used for training. Generative evaluation metrics are not implemented. Keep evaluation data representative and independent when assessing real-world performance. Accuracy is a basic check and alone is not sufficient to validate phishing detection.
-
-## Settings and outputs
-
-`config.yaml` controls epochs, learning rate, batch size, gradient accumulation, weight decay, gradient clipping, seed, maximum token length, and precision (`auto`, `fp32`, `fp16`, or `bf16`; mixed precision needs a compatible CUDA GPU). Long text is truncated to `max_length`. Inference controls batch size and the decision threshold for the positive label. The same precision setting applies to inference. `auto` uses bf16 on supported CUDA GPUs, otherwise fp16 on CUDA or fp32 on CPU. The default batch sizes are starting points for an RTX 4090; memory requirements depend on model and input length, so reduce batch sizes if needed. The scripts automatically use CUDA when PyTorch detects an available NVIDIA GPU; otherwise they use CPU with `fp32`, which can be slow. The selected device appears in the log and `python3 finetune.py --check`. Training prints the first batch and then progress every `train.progress_every` batches (default: 50); messages are flushed to the terminal and run log. The output includes one resumable checkpoint per completed epoch.
-
-Each training run gets a timestamped directory with `config.yaml`, `run.log`, `metadata.json`, optional `evaluation.json` containing validation metrics, one `checkpoints/epoch-NNN.pt` file per completed epoch, and a `COMPLETE` marker on success. The full trained model and tokenizer are saved separately under `/workspace/fine-tuned-weights/<output_model_name>`. Prediction produces a separate timestamped directory with `predictions.csv`, config, log, metadata and completion marker. Prediction rows preserve the input fields. Classifiers add `predicted_label` and `phishing_probability`; generative models add the raw `model_response` without converting it to a label or probability. Data hashes, model revision when available, device and library versions are recorded. Failed runs do not get a completion marker and may contain partial outputs. Avoid input column names that conflict with the output columns.
-
-Run local offline tests with `python3 -m unittest -v`. They train and predict with a tiny randomly initialized synthetic model; they do not validate model quality, real Hugging Face downloads, GPU operation, or Runpod deployment.
-
-## Automatic GitHub commits
-
-Run `python3 auto_commit.py` in the project folder to check for changes every two seconds, commit unignored files, and push to the configured upstream branch. Keep the process running; stop it with Ctrl-C. Use `--once` for one check, `--no-push` for local commits only, or `--interval 10` to change the interval. It refuses to include already-staged changes and never force-pushes. Git credentials and network access must be available to the running process. If a push fails, it reports the error and retries on a later check. Only one updated auto-committer can run per checkout; a second instance exits with a clear message. Other Git commands can still briefly lock the index, so transient lock errors are retried. If an index lock persists after all Git processes have stopped, inspect the repository before removing it.
-
-CSV and common dataset, checkpoint, model-weight, and secret-file extensions are ignored by default. Review `.gitignore` before using automatic pushes: other unignored files will be committed and sent to GitHub.
-
-## Split the final 20% of a CSV
+On your Runpod Pod, place the project under `/workspace` and open a terminal in the project folder:
 
 ```bash
-python3 split_csv.py
+python3 -m pip install -r requirements.txt
+python3 finetune.py --check
+python3 finetune.py
 ```
 
-This removes the last 20% of data records from `train.csv` in the project folder and writes them to a new `inference.csv` in that folder. Both files keep the original header and record text; no rows are shuffled or modified. If 20% is not a whole number of records, the holdout count is rounded up. The tool does not overwrite an existing `inference.csv`.
+`config.yaml` controls the model, dataset paths and hyperparameters. The default model is downloaded from Hugging Face into the Pod's local cache. CUDA is selected automatically when available. Training reads `data/train.csv`, prints progress, then evaluates a classifier on `data/validation.csv`. Label `1.0` is phishing. The validation set is not used to update model weights.
 
-To use other paths, run `python3 split_csv.py --train /path/to/train.csv --inference /path/to/inference.csv`. Update `data.train_csv` and `data.inference_csv` in `config.yaml` to those paths; the training and inference CSVs must be in different directories for the experiment. The splitter does not modify the configuration.
+The final model and tokenizer are saved to `/workspace/fine-tuned-weights/<train.output_model_name>/`. Choose a new `train.output_model_name` if that folder already exists; training will not overwrite it.
 
-## Keep the six data columns
+## Validate and test
 
-Run `python3 clean_csv.py` to clean the project folder's `train.csv` and `inference.csv`. It keeps `subject`, `body`, `urls`, `label`, `language`, and `source`, in that order, preserving the value and order of each record. Originals are retained as `train.original.csv` and `inference.original.csv`; existing backups are never overwritten. The tool rejects missing columns or malformed rows without replacing that file. It processes files one at a time, so if the second fails, the first may already be cleaned. Pass paths as arguments to clean other CSV files.
-
-During inference, only the configured `data.text_column` is tokenized; the CSV label column is not sent to the model. If present, the original label is retained in the output CSV for comparison. The text and label column settings must differ.
-
-## Validation, testing, and results analysis
-
-`data/validation.csv` and `data/test.csv` are a fixed-seed (42), class-stratified 50/50 split of the original `inference.csv`; the original is preserved. Training uses validation only for evaluation after training. The held-out test set is used by `python3 inference.py` (or `python3 inference.py --dataset test`). To run inference on validation instead, use `python3 inference.py --dataset validation`. Inference feeds the text column to the model, never the row's label.
-
-The prediction run writes `metrics.json` when ground-truth labels and model predictions match the two configured labels exactly. The positive label is `data.positive_label`. Metrics are fractions from 0 to 1, and an undefined precision, recall, or F1 is recorded as `null`. Generate metrics separately from a prediction file with:
+Classifier training evaluates the validation set after training and writes `evaluation.json` with accuracy, precision, recall, F1 and confusion counts. To run a separate validation or test inference:
 
 ```bash
-python3 analyze_results.py /path/to/predictions.csv
+python3 inference.py --dataset validation
+python3 inference.py --dataset test
 ```
 
-This writes `metrics.json` beside the predictions and does not overwrite an existing file; use `--output /path/to/new-metrics.json` for another location. Free-form model responses must match a ground-truth label exactly; ambiguous responses are not silently interpreted. Keep the test set separate from model and threshold selection. CSV datasets are ignored by Git and must be uploaded to a Runpod Pod separately.
-
-## Resume training from an epoch checkpoint
-
-Each completed epoch writes one checkpoint file in the run's `checkpoints/` folder. It contains the model, optimizer, scheduler, scaler, random states, and compatibility information together; there is no separate copy of the model for every checkpoint. For example:
+`test` is the default. The model comes from `inference.model_source` in `config.yaml`; use `local:Original` for `/workspace/fine-tuned-weights/Original`, or configure a different local model or Hugging Face repository. To use a different folder for one run:
 
 ```bash
-python3 finetune.py --config /workspace/phishing-detect-output/train-<timestamp>/config.yaml \
+python3 inference.py --dataset test --model-dir /workspace/fine-tuned-weights/Original
+```
+
+The validation and test files are a fixed-seed, class-stratified 50/50 split of `data/inference.csv`. Use validation for model and threshold choices and reserve test for the final check. The scripts feed the configured text column to the model, not the CSV label. The original label remains in the prediction CSV for scoring.
+
+## Files produced
+
+- **CSV data and predictions:** `data/`. Each inference run creates a uniquely named `predict-<timestamp>-predictions.csv` next to the selected input CSV and prints its path. For classifier models, it includes `predicted_label` and `phishing_probability`; generative models output `model_response`.
+- **Training run:** `/workspace/phishing-detect-output/train-<timestamp>/` contains the run configuration, `run.log`, metadata, validation `evaluation.json` for classifiers, one `checkpoints/epoch-NNN.pt` per completed epoch, and `COMPLETE` after success.
+- **Inference run:** `/workspace/phishing-detect-output/predict-<timestamp>/` contains the run configuration, log, metadata, and `COMPLETE` after success. `metrics.json` is also written if ground-truth labels and predictions can be compared.
+- **Final model:** `/workspace/fine-tuned-weights/<name>/` contains model weights and tokenizer files for later inference.
+
+Metrics use `data.positive_label`, currently `1.0`. Accuracy, precision, recall, and F1 are fractions from 0 to 1; an undefined metric is `null`. Free-form generative responses are scored only if they match the ground-truth labels exactly; ambiguous responses are not silently interpreted. To analyze a prediction CSV separately:
+
+```bash
+python3 analyze_results.py data/predict-<timestamp>-predictions.csv
+```
+
+That command writes `metrics.json` next to the specified CSV unless `--output` is supplied. It will not overwrite an existing metrics file.
+
+## Resume an interrupted run
+
+Use the original run's configuration and the desired checkpoint:
+
+```bash
+python3 finetune.py \\
+  --config /workspace/phishing-detect-output/train-<timestamp>/config.yaml \\
   --resume /workspace/phishing-detect-output/train-<timestamp>/checkpoints/epoch-001.pt
 ```
 
-Replace `<timestamp>` with the original run directory. Alternatively, set `train.resume_from` in `config.yaml`. The resumed run gets a new log/output directory and writes checkpoints for its remaining epochs. The training dataset, model/tokenizer, task, device type, effective precision, seed, and training settings—including the total number of epochs—must match the original run; the program rejects incompatible checkpoints. Keep the base model accessible and prefer an exact Hugging Face commit revision. You may change `train.output_model_name` if the final model folder already exists.
+The data, base model/tokenizer, device type, precision and training settings must match. If the final model folder already exists, change `train.output_model_name` in a copy of the config before resuming. Checkpoints include optimizer state and can be large; load only checkpoints you trust.
 
-Checkpoint files contain full model and optimizer state and may be large. Keep only those you need after a run; the program does not automatically delete earlier checkpoints. Load checkpoints only from sources you trust.
+## Other settings and utilities
+
+`train.task` and `inference.task` independently select `auto`, `classification`, `causal_lm`, or `seq2seq`. Generative models use `data.prompt_template`; inference generation settings are under `inference`. Not every model or modality works with the Transformers text workflow, and large models may exceed GPU memory. Use `trust_remote_code` only for repository code you trust.
+
+`python3 clean_csv.py` keeps the six configured data columns in `data/train.csv` and `data/inference.csv`, retaining original backups. `split_csv.py` and `split_validation_test.py` are available for creating splits; they do not overwrite existing outputs. Avoid re-splitting the current files unless you intend to create a new dataset.
+
+Stop the Runpod Pod when finished to end compute charges. The project includes a Dockerfile, but the image has not been tested on Runpod.
