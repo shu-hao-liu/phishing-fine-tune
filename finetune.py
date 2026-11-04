@@ -25,6 +25,8 @@ from analyze_results import analyze_predictions, calculate_metrics
 
 ROOT = Path(__file__).resolve().parent
 WEIGHTS_ROOT = Path('/workspace/fine-tuned-weights')
+OUTPUT_ROOT = Path('/workspace/phishing-detect-output')
+CACHE_ROOT = '/tmp/phishing-detect-hf-cache'
 LOG = logging.getLogger('phishing')
 
 
@@ -80,6 +82,24 @@ def resolve_model_source(source, revision, cache_dir, require_exists=True):
 def read_config(path, train_csv_override=None):
     with open(path, encoding='utf-8') as f:
         c = yaml.safe_load(f)
+    if isinstance(c, dict) and set(c) == {'train', 'validate', 'test'}:
+        train, validate, test = c['train'], c['validate'], c['test']
+        if not all(isinstance(section, dict) for section in (train, validate, test)):
+            raise ValueError('train, validate, and test must be configuration sections')
+        c = {'train': dict(train), 'data': {
+            'train_csv': str(ROOT / 'data/train.csv'),
+            'eval_csv': str(ROOT / 'data/validation.csv'),
+            'inference_csv': str(ROOT / 'data/test.csv'),
+            'text_column': train.get('text_column', 'body'),
+            'label_column': train.get('label_column', 'label'),
+            'positive_label': train.get('positive_label', '1.0'),
+            'max_length': train.get('max_length', 512),
+            'prompt_template': train.get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:'),
+        }, 'inference': dict(test)}
+        c['train'].update(cache_dir=CACHE_ROOT, output_dir=str(OUTPUT_ROOT))
+        c['inference'].update(cache_dir=CACHE_ROOT, output_dir=str(OUTPUT_ROOT))
+        c['inference'].setdefault('threshold', validate.get('threshold', 0.5))
+        c['validation_threshold'] = validate.get('threshold', 0.5)
     for section in ('train', 'data', 'inference'):
         if not isinstance(c.get(section), dict):
             raise ValueError(f'Missing {section} configuration')
@@ -142,6 +162,9 @@ def read_config(path, train_csv_override=None):
     positive_index = c['inference'].get('positive_label_index')
     if positive_index is not None and (isinstance(positive_index, bool) or positive_index not in (0, 1)):
         raise ValueError('inference.positive_label_index must be null, 0, or 1')
+    validation_threshold = c.get('validation_threshold', c['inference'].get('threshold'))
+    if isinstance(validation_threshold, bool) or not isinstance(validation_threshold, (int, float)) or not math.isfinite(validation_threshold) or not 0 <= validation_threshold <= 1:
+        raise ValueError('validate.threshold must be between 0 and 1')
     threshold = c['inference'].get('threshold')
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError('inference.threshold must be between 0 and 1')
@@ -509,7 +532,13 @@ def train(c, out, device):
                         'cuda_rng': torch.cuda.get_rng_state_all() if device.type == 'cuda' else None})
         LOG.info('Saved checkpoint: %s', checkpoint_path)
     if evaluation and task != 'classification':
-        LOG.info('Labeled evaluation metrics are not implemented for generative models')
+        validation_config = dict(c)
+        validation_config['data'] = dict(data, inference_csv=data['eval_csv'], selected_dataset='validation')
+        validation_dir = out / f'validation-epoch-{settings["epochs"]:03d}'
+        validation_dir.mkdir()
+        fields, _ = read_csv(data['eval_csv'], data['text_column'], data['label_column'])
+        predictions = predict_generative(validation_config, validation_dir, device, settings['model_source'], repo, opts, tokenizer, fields, evaluation, task, loaded_model=model)
+        save_prediction_metrics(validation_config, validation_dir, predictions)
     if evaluation and task == 'classification':
         tp = fp = tn = fn = 0
         model.eval()
@@ -518,14 +547,14 @@ def train(c, out, device):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 target = batch.pop('labels')
                 with autocast(device, precision): logits = model(**batch).logits
-                predicted = torch.softmax(logits.float(), dim=-1)[:, 1] >= c['inference']['threshold']
+                predicted = torch.softmax(logits.float(), dim=-1)[:, 1] >= c.get('validation_threshold', c['inference']['threshold'])
                 positive = target == 1
                 tp += (predicted & positive).sum().item()
                 fp += (predicted & ~positive).sum().item()
                 tn += (~predicted & ~positive).sum().item()
                 fn += (~predicted & positive).sum().item()
         metrics = calculate_metrics(tp, fp, tn, fn)
-        metrics.update({'positive_label': data['positive_label'], 'threshold': c['inference']['threshold'], 'checkpoint': f'epoch-{settings["epochs"]:03d}'})
+        metrics.update({'positive_label': data['positive_label'], 'threshold': c.get('validation_threshold', c['inference']['threshold']), 'checkpoint': f'epoch-{settings["epochs"]:03d}'})
         LOG.info('Validation metrics: %s', json.dumps(metrics))
         (out / f'evaluation-epoch-{settings["epochs"]:03d}.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
     model_root.mkdir(parents=True, exist_ok=True)
@@ -722,20 +751,15 @@ def main(forced_action=None):
     parser.add_argument('--config', default=str(ROOT / 'config.yaml'))
     if forced_action is None:
         sub = parser.add_subparsers(dest='action', required=True)
-        sub.add_parser('check', help='validate configuration and inspect local hardware')
-        sub.add_parser('train', help='fine-tune the configured model on the training CSV')
-        prediction = sub.add_parser('predict', help='classify the separate inference CSV')
-        prediction.add_argument('--model-dir', help='override inference model source in config')
-        prediction.add_argument('--dataset', choices=('validation', 'test'), default='test')
-        prediction.add_argument('--checkpoint', help='use an epoch checkpoint file for inference')
+        sub.add_parser('train', help='train and validate the model')
+        prediction = sub.add_parser('test', help='test the model on data/test.csv')
+        prediction.add_argument('--checkpoint', help='test an epoch checkpoint')
     elif forced_action == 'train':
-        parser.add_argument('--train-csv', help='override data.train_csv in the shared config')
         parser.add_argument('--resume', help='resume training from an epoch checkpoint')
         parser.add_argument('--check', action='store_true', help='validate configuration and inspect local hardware')
-    elif forced_action == 'predict':
-        parser.add_argument('--model-dir', help='override inference model source in config')
-        parser.add_argument('--dataset', choices=('validation', 'test'), default='test')
-        parser.add_argument('--checkpoint', help='use an epoch checkpoint file for inference')
+    elif forced_action in ('predict', 'test'):
+        forced_action = 'test'
+        parser.add_argument('--checkpoint', help='test an epoch checkpoint')
     args = parser.parse_args()
     if forced_action is not None:
         args.action = 'check' if forced_action == 'train' and args.check else forced_action
@@ -747,20 +771,16 @@ def main(forced_action=None):
         if args.action == 'check':
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
-        if args.action == 'predict':
-            if args.dataset == 'validation':
-                if not c['data'].get('eval_csv'):
-                    raise ValueError('Set data.eval_csv to use the validation set')
-                c['data']['inference_csv'] = c['data']['eval_csv']
-            c['data']['selected_dataset'] = args.dataset
-            args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')
+        if args.action == 'test':
+            c['data']['selected_dataset'] = 'test'
+            args.model_dir = c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():
                 if getattr(args, 'checkpoint', None) or c['inference'].get('checkpoint'):
                     args.model_dir = 'checkpoint'
                 else:
-                    raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
-        checkpoint = (getattr(args, 'checkpoint', None) or c['inference'].get('checkpoint')) if args.action == 'predict' else None
-        out = setup_run(c, args.action, getattr(args, 'model_dir', None), checkpoint)
+                    raise ValueError('Set test.model_source in config.yaml')
+        checkpoint = (getattr(args, 'checkpoint', None) or c['inference'].get('checkpoint')) if args.action == 'test' else None
+        out = setup_run(c, 'predict' if args.action == 'test' else args.action, getattr(args, 'model_dir', None), checkpoint)
         try:
             LOG.info('Device: %s%s; precision: %s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)', effective_precision(c, device))
             if args.action == 'train': train(c, out, device)
