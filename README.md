@@ -12,7 +12,7 @@ Fine-tune Hugging Face text models on a labeled CSV and run inference on a separ
    python3 finetune.py --check
    ```
 
-3. Upload the labeled training CSV to the project folder as `training.csv`. By default, the separate inference CSV is `/workspace/phishing-data/inference/inference.csv`. The files must exist; the program never creates or invents examples. Optional evaluation data may be specified separately. Training and inference CSVs must be in different directories.
+3. Upload the labeled training CSV to the project folder as `train.csv`. By default, the separate inference CSV is `/workspace/phishing-data/inference/inference.csv`. The files must exist; the program never creates or invents examples. Optional evaluation data may be specified separately. Training and inference CSVs must be in different directories.
 4. Edit `config.yaml`, in particular `train.model_source`, `data.*` column names and paths, and `data.positive_label`. For a Hugging Face source, use a model commit hash as `train.model_revision` for reproducibility. The default `main` is a moving revision; the resolved commit is recorded when available. Model weights and tokenizer files download into `train.cache_dir` (default `/tmp/phishing-detect-hf-cache`) on the Pod's local container storage and are reused while that cache remains available. The default cache is not persistent across Pod replacement. Set `HF_TOKEN` in the Pod environment for a gated model, and accept its license on Hugging Face first; never put tokens in `config.yaml`.
 5. Choose a new folder name in `train.output_model_name` (for example, `Model-1`). Training saves the model and tokenizer to `/workspace/fine-tuned-weights/Model-1`. Existing folders are never overwritten; choose another name for each new run. Train and then use that folder:
 
@@ -39,7 +39,7 @@ For generative inference, configure `max_new_tokens`, `do_sample`, `temperature`
 Training requires a text column and nonempty labels. Classifier mode requires exactly two label values, including `data.positive_label`; generative modes train on the label text. For example, with the default column names:
 
 ```csv
-text,label
+body,label
 "Please verify your account via this link",phishing
 "The meeting is at 3 PM",legitimate
 ```
@@ -47,7 +47,7 @@ text,label
 Inference requires the text column; other columns are preserved in the predictions file:
 
 ```csv
-text,id
+body,id
 "Your account needs verification",123
 "See you at the meeting",124
 ```
