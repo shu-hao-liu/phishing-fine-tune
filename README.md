@@ -40,8 +40,8 @@ Training requires a text column and nonempty labels. Classifier mode requires ex
 
 ```csv
 body,label
-"Please verify your account via this link",phishing
-"The meeting is at 3 PM",legitimate
+"Please verify your account via this link",1.0
+"The meeting is at 3 PM",0.0
 ```
 
 Inference requires the text column; other columns are preserved in the predictions file:
