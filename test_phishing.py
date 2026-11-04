@@ -147,6 +147,7 @@ class PhishingTests(unittest.TestCase):
         self.c['data']['max_length'] = 16
         self.c['data']['prompt_template'] = '{text}'
         self.c['inference'].update(max_new_tokens=2, do_sample=False)
+        self.c['data']['eval_csv'] = self.c['data']['inference_csv']
         for task in ('causal_lm', 'seq2seq'):
             with self.subTest(task=task):
                 base = self.root / ('base-' + task)
@@ -165,6 +166,7 @@ class PhishingTests(unittest.TestCase):
                 run = self.root / ('run-' + task)
                 run.mkdir()
                 p.train(self.c, run, torch.device('cpu'))
+                self.assertTrue((run / 'validation-epoch-001' / 'predictions.csv').exists())
                 out = self.root / ('pred-' + task)
                 out.mkdir()
                 prediction = p.predict(self.c, out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task))
