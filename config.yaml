@@ -17,8 +17,8 @@ train:
   progress_every: 50
 data:
   train_csv: train.csv
-  inference_csv: /workspace/phishing-data/inference/inference.csv
-  eval_csv: null
+  inference_csv: data/test.csv
+  eval_csv: data/validation.csv
   text_column: body
   label_column: label
   positive_label: '1.0'
