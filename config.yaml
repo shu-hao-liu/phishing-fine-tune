@@ -21,7 +21,7 @@ data:
   eval_csv: null
   text_column: body
   label_column: label
-  positive_label: phishing
+  positive_label: '1.0'
   max_length: 512
   prompt_template: 'Classify the following text as phishing or legitimate.
 
