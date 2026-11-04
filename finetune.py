@@ -19,6 +19,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import yaml
 
+from analyze_results import analyze_predictions, calculate_metrics
+
 ROOT = Path(__file__).resolve().parent
 WEIGHTS_ROOT = Path('/workspace/fine-tuned-weights')
 LOG = logging.getLogger('phishing')
@@ -391,17 +393,23 @@ def train(c, out, device):
     if evaluation and task != 'classification':
         LOG.info('Labeled evaluation metrics are not implemented for generative models')
     if evaluation and task == 'classification':
-        correct = total = 0
+        tp = fp = tn = fn = 0
         model.eval()
         with torch.inference_mode():
             for batch in make_loader(evaluation, tokenizer, c, labels):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 target = batch.pop('labels')
                 with autocast(device, precision): logits = model(**batch).logits
-                correct += (logits.argmax(dim=-1) == target).sum().item()
-                total += len(target)
-        LOG.info('Evaluation accuracy: %.4f (%d/%d)', correct / total, correct, total)
-        (out / 'evaluation.json').write_text(json.dumps({'accuracy': correct / total, 'correct': correct, 'count': total}, indent=2))
+                predicted = torch.softmax(logits.float(), dim=-1)[:, 1] >= c['inference']['threshold']
+                positive = target == 1
+                tp += (predicted & positive).sum().item()
+                fp += (predicted & ~positive).sum().item()
+                tn += (~predicted & ~positive).sum().item()
+                fn += (~predicted & positive).sum().item()
+        metrics = calculate_metrics(tp, fp, tn, fn)
+        metrics.update({'positive_label': data['positive_label'], 'threshold': c['inference']['threshold']})
+        LOG.info('Validation metrics: %s', json.dumps(metrics))
+        (out / 'evaluation.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
     WEIGHTS_ROOT.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(exist_ok=False)
     try:
@@ -517,6 +525,22 @@ def predict(c, out, device, model_source):
     LOG.info('Saved %d predictions to %s', offset, output)
 
 
+def save_prediction_metrics(c, out):
+    path = out / 'predictions.csv'
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        fields = csv.DictReader(f).fieldnames or []
+    if c['data']['label_column'] not in fields:
+        LOG.info('No ground-truth label column; metrics were not calculated')
+        return
+    try:
+        metrics = analyze_predictions(path, c['data']['label_column'], c['data']['positive_label'])
+    except ValueError as exc:
+        LOG.warning('Metrics not calculated: %s', exc)
+        return
+    (out / 'metrics.json').write_text(json.dumps(metrics, indent=2) + '\n', encoding='utf-8')
+    LOG.info('Saved metrics: %s', json.dumps(metrics))
+
+
 def main(forced_action=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default=str(ROOT / 'config.yaml'))
@@ -526,11 +550,13 @@ def main(forced_action=None):
         sub.add_parser('train', help='fine-tune the configured model on the training CSV')
         prediction = sub.add_parser('predict', help='classify the separate inference CSV')
         prediction.add_argument('--model-dir', help='override inference model source in config')
+        prediction.add_argument('--dataset', choices=('validation', 'test'), default='test')
     elif forced_action == 'train':
         parser.add_argument('--train-csv', help='override data.train_csv in the shared config')
         parser.add_argument('--check', action='store_true', help='validate configuration and inspect local hardware')
     elif forced_action == 'predict':
         parser.add_argument('--model-dir', help='override inference model source in config')
+        parser.add_argument('--dataset', choices=('validation', 'test'), default='test')
     args = parser.parse_args()
     if forced_action is not None:
         args.action = 'check' if forced_action == 'train' and args.check else forced_action
@@ -541,6 +567,11 @@ def main(forced_action=None):
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
         if args.action == 'predict':
+            if args.dataset == 'validation':
+                if not c['data'].get('eval_csv'):
+                    raise ValueError('Set data.eval_csv to use the validation set')
+                c['data']['inference_csv'] = c['data']['eval_csv']
+            c['data']['selected_dataset'] = args.dataset
             args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():
                 raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
@@ -548,7 +579,9 @@ def main(forced_action=None):
         try:
             LOG.info('Device: %s%s; precision: %s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)', effective_precision(c, device))
             if args.action == 'train': train(c, out, device)
-            else: predict(c, out, device, args.model_dir)
+            else:
+                predict(c, out, device, args.model_dir)
+                save_prediction_metrics(c, out)
             (out / 'COMPLETE').write_text('Completed successfully.\n')
         except Exception:
             LOG.exception('Run failed')

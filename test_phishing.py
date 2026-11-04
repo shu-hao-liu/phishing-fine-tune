@@ -20,7 +20,7 @@ class PhishingTests(unittest.TestCase):
         self.weights_patch.start()
         self.addCleanup(self.weights_patch.stop)
         self.c = yaml.safe_load((p.ROOT / 'config.yaml').read_text())
-        self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), max_length=16)
+        self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), eval_csv=None, text_column='text', positive_label='phishing', max_length=16)
         self.c['train']['task'] = 'classification'
         self.c['inference']['task'] = 'classification'
         self.c['train'].update(output_model_name='Model-1', epochs=1, batch_size=2, gradient_accumulation_steps=2)
