@@ -19,7 +19,7 @@ class PhishingTests(unittest.TestCase):
         self.weights_patch = patch.object(p, 'WEIGHTS_ROOT', self.root / 'weights')
         self.weights_patch.start()
         self.addCleanup(self.weights_patch.stop)
-        self.c = yaml.safe_load((p.ROOT / 'config.yaml').read_text())
+        self.c = p.read_config(p.ROOT / 'config.yaml')
         self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), eval_csv=None, text_column='text', positive_label='phishing', max_length=16)
         self.c['train']['task'] = 'classification'
         self.c['inference']['task'] = 'classification'
@@ -31,7 +31,7 @@ class PhishingTests(unittest.TestCase):
         (self.root / 'infer' / 'data.csv').write_text('text,id,label\nhello friend,1,legitimate\nclick now,2,phishing\n')
 
     def test_three_config_sections_and_device_selection(self):
-        self.assertEqual(set(self.c), {'train', 'data', 'inference'})
+        self.assertEqual(set(yaml.safe_load((p.ROOT / 'config.yaml').read_text())), {'train', 'validate', 'test'})
         self.c['train']['precision'] = 'fp32'
         with patch.object(torch.cuda, 'is_available', return_value=True):
             self.assertEqual(p.configure_device(self.c).type, 'cuda')
