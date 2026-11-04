@@ -5,6 +5,8 @@ from contextlib import nullcontext
 import csv
 from datetime import datetime, timezone
 import hashlib
+import importlib
+import importlib.util
 import json
 import logging
 import math
@@ -288,6 +290,21 @@ def setup_run(config, operation, model_source=None, checkpoint=None):
     (run / 'config.yaml').write_text(yaml.safe_dump(config, sort_keys=False), encoding='utf-8')
     LOG.info('Outputs: %s', run)
     return run
+
+
+def check_optional_vision_dependency():
+    """Catch a broken optional torchvision installation before loading a model."""
+    if importlib.util.find_spec('torchvision') is None:
+        return
+    try:
+        importlib.import_module('torchvision')
+    except Exception as exc:
+        raise RuntimeError(
+            'The installed torchvision cannot be imported and may be incompatible with PyTorch. '
+            'This text-only project does not require torchvision. If it is not needed by other '
+            'software in this environment, remove it with: python3 -m pip uninstall -y torchvision. '
+            f'Original error: {type(exc).__name__}: {exc}'
+        ) from exc
 
 
 def configure_device(c):
@@ -768,6 +785,7 @@ def main(forced_action=None):
         if getattr(args, 'resume', None):
             c['train']['resume_from'] = args.resume
         device = configure_device(c)
+        check_optional_vision_dependency()
         if args.action == 'check':
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0

@@ -63,3 +63,15 @@ Testing always reads `data/test.csv`. The label is not included in model input; 
 - Test predictions, metrics when available, logs and settings: `/workspace/phishing-detect-output/<model>/<checkpoint-or-final>/predict-<timestamp>/`.
 
 The Hugging Face download cache is on the Pod's local disk. Each output run has its own folder. `train.task` and `test.task` support `auto`, `classification`, `causal_lm` and `seq2seq`; model architecture, available memory and Transformers support still determine which models can run.
+
+## If torchvision fails to import
+
+If you see `RuntimeError: operator torchvision::nms does not exist`, the Pod's torchvision installation may not match its PyTorch installation. This text-only project does not need torchvision. If no other software in that environment needs it, remove it and retry:
+
+```bash
+python3 -m pip uninstall -y torchvision
+python3 finetune.py --check
+python3 finetune.py
+```
+
+If you need torchvision for another project, use a separate environment or install a torchvision build compatible with your installed PyTorch and CUDA instead.
