@@ -16,10 +16,10 @@ train:
   output_dir: /workspace/phishing-detect-output
   progress_every: 50
 data:
-  train_csv: training.csv
+  train_csv: train.csv
   inference_csv: /workspace/phishing-data/inference/inference.csv
   eval_csv: null
-  text_column: text
+  text_column: body
   label_column: label
   positive_label: phishing
   max_length: 512
