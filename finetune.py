@@ -96,7 +96,7 @@ def read_config(path, train_csv_override=None):
             'label_column': train.get('label_column', 'label'),
             'positive_label': train.get('positive_label', '1.0'),
             'max_length': train.get('max_length', 512),
-            'prompt_template': train.get('prompt_template', 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:'),
+            'prompt_template': 'Classify the following text as phishing or legitimate.\nText: {text}\nLabel:',
         }, 'inference': dict(test)}
         c['train'].update(cache_dir=CACHE_ROOT, output_dir=str(OUTPUT_ROOT))
         c['inference'].update(cache_dir=CACHE_ROOT, output_dir=str(OUTPUT_ROOT))
