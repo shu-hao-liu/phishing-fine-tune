@@ -77,6 +77,45 @@ class PhishingTests(unittest.TestCase):
         bad.write_text('text,label\n,phishing\n')
         with self.assertRaisesRegex(ValueError, 'missing text'): p.read_csv(bad, 'text', 'label')
 
+    def test_epoch_checkpoint_resume_matches_uninterrupted(self):
+        vocab = self.root / 'vocab.txt'
+        vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\n')
+        tokenizer = DistilBertTokenizerFast(vocab_file=str(vocab))
+        base = self.root / 'resume-base'
+        base.mkdir()
+        tokenizer.save_pretrained(base)
+        cfg = DistilBertConfig(vocab_size=len(tokenizer), dim=16, hidden_dim=32, n_layers=1, n_heads=2, max_position_embeddings=32, num_labels=2)
+        torch.manual_seed(123)
+        AutoModelForSequenceClassification.from_config(cfg).save_pretrained(base)
+        self.c['train'].update(model_source=str(base), task='classification', epochs=2, output_model_name='baseline')
+        self.c['data']['max_length'] = 16
+        baseline = self.root / 'baseline-run'
+        baseline.mkdir()
+        p.train(self.c, baseline, torch.device('cpu'))
+        self.assertEqual(len(list((baseline / 'checkpoints').glob('*.pt'))), 2)
+        self.c['train']['output_model_name'] = 'resumed'
+        interrupted = self.root / 'interrupted-run'
+        interrupted.mkdir()
+        original_save = p.save_checkpoint
+        def interrupt_after_save(path, state):
+            original_save(path, state)
+            if state['epoch'] == 1:
+                raise RuntimeError('simulated interruption')
+        with patch.object(p, 'save_checkpoint', side_effect=interrupt_after_save):
+            with self.assertRaisesRegex(RuntimeError, 'simulated interruption'):
+                p.train(self.c, interrupted, torch.device('cpu'))
+        self.c['train']['resume_from'] = str(interrupted / 'checkpoints' / 'epoch-001.pt')
+        resumed = self.root / 'resumed-run'
+        resumed.mkdir()
+        p.train(self.c, resumed, torch.device('cpu'))
+        first = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'baseline').state_dict()
+        second = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'resumed').state_dict()
+        self.assertTrue(all(torch.equal(first[k], second[k]) for k in first))
+        self.assertEqual([x.name for x in (resumed / 'checkpoints').glob('*.pt')], ['epoch-002.pt'])
+        self.c['train'].update(seed=99, output_model_name='mismatch')
+        with self.assertRaisesRegex(ValueError, 'Checkpoint does not match'):
+            p.train(self.c, resumed, torch.device('cpu'))
+
     def test_generative_models_train_and_predict(self):
         vocab = self.root / 'vocab.txt'
         vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\nphishing\nlegitimate\n')
