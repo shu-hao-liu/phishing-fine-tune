@@ -96,7 +96,7 @@ class PhishingTests(unittest.TestCase):
         baseline = self.root / 'baseline-run'
         baseline.mkdir()
         p.train(self.c, baseline, torch.device('cpu'))
-        self.assertEqual(len(list((baseline / 'checkpoints').glob('*.pt'))), 2)
+        self.assertEqual(len(list((p.WEIGHTS_ROOT / 'baseline' / 'checkpoints' / baseline.name).glob('*.pt'))), 2)
         self.c['train']['output_model_name'] = 'resumed'
         interrupted = self.root / 'interrupted-run'
         interrupted.mkdir()
@@ -108,14 +108,21 @@ class PhishingTests(unittest.TestCase):
         with patch.object(p, 'save_checkpoint', side_effect=interrupt_after_save):
             with self.assertRaisesRegex(RuntimeError, 'simulated interruption'):
                 p.train(self.c, interrupted, torch.device('cpu'))
-        self.c['train']['resume_from'] = str(interrupted / 'checkpoints' / 'epoch-001.pt')
+        self.c['train']['resume_from'] = str(p.WEIGHTS_ROOT / 'resumed' / 'checkpoints' / interrupted.name / 'epoch-001.pt')
+        checkpoint_out = self.root / 'checkpoint-inference'
+        checkpoint_out.mkdir()
+        prediction = p.predict(self.c, checkpoint_out, torch.device('cpu'), 'local:resumed', self.c['train']['resume_from'])
+        self.assertTrue(prediction.exists())
+        result = json.loads((checkpoint_out / 'metadata.json').read_text())
+        self.assertTrue(result['checkpoint'].endswith('epoch-001.pt'))
+        self.assertEqual(p.inference_labels(self.c, 'local:resumed', self.c['train']['resume_from']), ('resumed', 'epoch-001'))
         resumed = self.root / 'resumed-run'
         resumed.mkdir()
         p.train(self.c, resumed, torch.device('cpu'))
-        first = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'baseline').state_dict()
-        second = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'resumed').state_dict()
+        first = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'baseline' / 'final').state_dict()
+        second = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'resumed' / 'final').state_dict()
         self.assertTrue(all(torch.equal(first[k], second[k]) for k in first))
-        self.assertEqual([x.name for x in (resumed / 'checkpoints').glob('*.pt')], ['epoch-002.pt'])
+        self.assertEqual([x.name for x in (p.WEIGHTS_ROOT / 'resumed' / 'checkpoints' / resumed.name).glob('*.pt')], ['epoch-002.pt'])
         self.c['train'].update(seed=99, output_model_name='mismatch')
         with self.assertRaisesRegex(ValueError, 'Checkpoint does not match'):
             p.train(self.c, resumed, torch.device('cpu'))
@@ -148,7 +155,7 @@ class PhishingTests(unittest.TestCase):
                 out = self.root / ('pred-' + task)
                 out.mkdir()
                 prediction = p.predict(self.c, out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task))
-                self.assertEqual(prediction.parent, (self.root / 'infer'))
+                self.assertEqual(prediction.parent, out)
                 with prediction.open(newline='') as f:
                     rows = list(csv.DictReader(f))
                 self.assertEqual(len(rows), 2)
@@ -182,15 +189,15 @@ class PhishingTests(unittest.TestCase):
         p.save_prediction_metrics(self.c, pred_dir, prediction)
         self.assertEqual(json.loads((pred_dir / 'metrics.json').read_text())['count'], 2)
         self.assertTrue(all(r['predicted_label'] in ('legitimate', 'phishing') and 0 <= float(r['phishing_probability']) <= 1 for r in rows))
-        self.assertTrue((p.WEIGHTS_ROOT / 'Model-1' / 'config.json').exists())
-        self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.WEIGHTS_ROOT / 'Model-1').resolve()))
+        self.assertTrue((p.WEIGHTS_ROOT / 'Model-1' / 'final' / 'config.json').exists())
+        self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.WEIGHTS_ROOT / 'Model-1' / 'final').resolve()))
         with self.assertRaises(FileExistsError):
             p.train(self.c, train_dir, torch.device('cpu'))
         # Train again from the already saved local weights, with no Hub download.
         self.c['train']['model_source'] = 'local:Model-1'
         self.c['train']['output_model_name'] = 'Model-2'
         p.train(self.c, train_dir, torch.device('cpu'))
-        self.assertTrue((p.WEIGHTS_ROOT / 'Model-2' / 'config.json').exists())
+        self.assertTrue((p.WEIGHTS_ROOT / 'Model-2' / 'final' / 'config.json').exists())
 
         # A separately selected Hub classifier can use a different positive index.
         model.config.id2label = {0: 'phishing', 1: 'legitimate'}
