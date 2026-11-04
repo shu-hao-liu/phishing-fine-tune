@@ -79,9 +79,7 @@ The explicit output path avoids overwriting the `metrics.json` already produced 
 Use the original run's configuration and the desired checkpoint:
 
 ```bash
-python3 finetune.py \\
-  --config /workspace/phishing-detect-output/train-<timestamp>/config.yaml \\
-  --resume /workspace/phishing-detect-output/train-<timestamp>/checkpoints/epoch-001.pt
+python3 finetune.py --config /workspace/phishing-detect-output/Original/training/train-<timestamp>/config.yaml --resume /workspace/fine-tuned-weights/Original/checkpoints/train-<timestamp>/epoch-001.pt
 ```
 
 The data, base model/tokenizer, device type, precision and training settings must match. If the final model folder already exists, change `train.output_model_name` in a copy of the config before resuming. Checkpoints include optimizer state and can be large; load only checkpoints you trust.
