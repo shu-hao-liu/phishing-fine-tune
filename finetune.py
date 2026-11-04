@@ -13,6 +13,7 @@ from pathlib import Path
 import random
 import shutil
 import sys
+import tempfile
 from urllib.parse import urlparse
 
 import torch
@@ -150,6 +151,9 @@ def read_config(path, train_csv_override=None):
         value = inf.get(key, 0.7 if key == 'temperature' else 0.9)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or (upper is not None and value > upper):
             raise ValueError(f'inference.{key} must be positive' + (' and at most 1' if upper else ''))
+    resume = c['train'].get('resume_from')
+    if resume is not None and (not isinstance(resume, str) or not resume.strip()):
+        raise ValueError('train.resume_from must be null or a checkpoint path')
     progress = c['train'].get('progress_every', 1)
     if isinstance(progress, bool) or not isinstance(progress, int) or progress < 1:
         raise ValueError('train.progress_every must be a positive integer')
@@ -314,6 +318,41 @@ def make_generative_loader(rows, tokenizer, c, task, model, shuffle=False):
     return DataLoader(ds, batch_size=c['train']['batch_size'], shuffle=shuffle, collate_fn=collator)
 
 
+def checkpoint_identity(c, model, tokenizer, task, device, labels, data_hash):
+    settings, data = c['train'], c['data']
+    training_keys = ('model_source', 'model_revision', 'trust_remote_code', 'epochs', 'learning_rate',
+                     'batch_size', 'gradient_accumulation_steps', 'weight_decay', 'max_grad_norm', 'seed')
+    data_keys = ('text_column', 'label_column', 'positive_label', 'max_length', 'prompt_template')
+    tokenizer_info = {'vocab': tokenizer.get_vocab(), 'special_tokens': tokenizer.special_tokens_map}
+    if getattr(tokenizer, 'backend_tokenizer', None) is not None:
+        tokenizer_info['backend'] = tokenizer.backend_tokenizer.to_str()
+    tokenizer_hash = hashlib.sha256(json.dumps(tokenizer_info, sort_keys=True, default=str).encode()).hexdigest()
+    model_config = model.config.to_dict()
+    model_config.pop('_name_or_path', None)
+    config_hash = hashlib.sha256(json.dumps(model_config, sort_keys=True, default=str).encode()).hexdigest()
+    return {'training': {k: settings.get(k) for k in training_keys},
+            'data': {k: data.get(k) for k in data_keys}, 'train_csv_sha256': data_hash,
+            'task': task, 'labels': labels, 'device_type': device.type,
+            'precision': effective_precision(c, device), 'model_config_sha256': config_hash,
+            'tokenizer_sha256': tokenizer_hash, 'model_commit': getattr(model.config, '_commit_hash', None)}
+
+
+def save_checkpoint(path, state):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.checkpoint-', suffix='.pt', delete=False) as handle:
+            tmp = Path(handle.name)
+            torch.save(state, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['train']
@@ -322,6 +361,7 @@ def train(c, out, device):
         raise FileExistsError(f'Trained model directory already exists: {model_dir}; choose a different output_model_name')
     LOG.info('Reading training data: %s', data['train_csv'])
     _, rows = read_csv(data['train_csv'], data['text_column'], data['label_column'])
+    train_hash = sha256(data['train_csv'])
     classes = sorted({r[data['label_column']].strip() for r in rows})
     labels = None
     evaluation = None
@@ -366,8 +406,26 @@ def train(c, out, device):
     LOG.info('Training precision: %s', precision)
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda' and precision == 'fp16'))
     optimizer.zero_grad(set_to_none=True)
+    identity = checkpoint_identity(c, model, tokenizer, task, device, labels, train_hash)
+    start_epoch = 0
+    if settings.get('resume_from'):
+        checkpoint = torch.load(settings['resume_from'], map_location='cpu', weights_only=False)
+        if checkpoint.get('format_version') != 1 or checkpoint.get('identity') != identity:
+            raise ValueError('Checkpoint does not match the model, tokenizer, data, device, or training settings')
+        start_epoch = checkpoint['epoch']
+        if not isinstance(start_epoch, int) or not 0 < start_epoch <= settings['epochs']:
+            raise ValueError('Checkpoint epoch is invalid for this training configuration')
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        scheduler.load_state_dict(checkpoint['scheduler'])
+        scaler.load_state_dict(checkpoint['scaler'])
+        random.setstate(checkpoint['python_rng'])
+        torch.set_rng_state(checkpoint['torch_rng'])
+        if device.type == 'cuda':
+            torch.cuda.set_rng_state_all(checkpoint['cuda_rng'])
+        LOG.info('Resuming after epoch %d from %s', start_epoch, settings['resume_from'])
     LOG.info('Starting training: %d records, %d batches per epoch, %d epochs', len(rows), len(loader), settings['epochs'])
-    for epoch in range(settings['epochs']):
+    for epoch in range(start_epoch, settings['epochs']):
         LOG.info('Epoch %d/%d started', epoch + 1, settings['epochs'])
         model.train()
         total_loss = 0.0
@@ -390,6 +448,13 @@ def train(c, out, device):
             if i == 0 or (i + 1) % settings.get('progress_every', 1) == 0 or i + 1 == len(loader):
                 LOG.info('Epoch %d/%d batch %d/%d loss %.6f', epoch + 1, settings['epochs'], i + 1, len(loader), loss.item())
         LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
+        checkpoint_path = out / 'checkpoints' / f'epoch-{epoch + 1:03d}.pt'
+        save_checkpoint(checkpoint_path, {'format_version': 1, 'epoch': epoch + 1, 'identity': identity,
+                        'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
+                        'scheduler': scheduler.state_dict(), 'scaler': scaler.state_dict(),
+                        'python_rng': random.getstate(), 'torch_rng': torch.get_rng_state(),
+                        'cuda_rng': torch.cuda.get_rng_state_all() if device.type == 'cuda' else None})
+        LOG.info('Saved checkpoint: %s', checkpoint_path)
     if evaluation and task != 'classification':
         LOG.info('Labeled evaluation metrics are not implemented for generative models')
     if evaluation and task == 'classification':
@@ -419,7 +484,7 @@ def train(c, out, device):
         shutil.rmtree(model_dir)
         raise
     metadata = common_metadata(c, device)
-    metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'task': task, 'labels': labels if labels is not None else classes, 'trained_model_dir': str(model_dir), 'training_csv_sha256': sha256(data['train_csv']), 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
+    metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'task': task, 'labels': labels if labels is not None else classes, 'trained_model_dir': str(model_dir), 'training_csv_sha256': train_hash, 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     LOG.info('Saved trained model to %s', model_dir)
 
@@ -553,6 +618,7 @@ def main(forced_action=None):
         prediction.add_argument('--dataset', choices=('validation', 'test'), default='test')
     elif forced_action == 'train':
         parser.add_argument('--train-csv', help='override data.train_csv in the shared config')
+        parser.add_argument('--resume', help='resume training from an epoch checkpoint')
         parser.add_argument('--check', action='store_true', help='validate configuration and inspect local hardware')
     elif forced_action == 'predict':
         parser.add_argument('--model-dir', help='override inference model source in config')
@@ -562,6 +628,8 @@ def main(forced_action=None):
         args.action = 'check' if forced_action == 'train' and args.check else forced_action
     try:
         c = read_config(args.config, getattr(args, 'train_csv', None))
+        if getattr(args, 'resume', None):
+            c['train']['resume_from'] = args.resume
         device = configure_device(c)
         if args.action == 'check':
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')

@@ -5,6 +5,7 @@ train:
   trust_remote_code: false
   cache_dir: /tmp/phishing-detect-hf-cache
   output_model_name: Original
+  resume_from: null
   epochs: 3
   learning_rate: 2.0e-05
   batch_size: 16
