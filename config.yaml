@@ -7,14 +7,14 @@ train:
   output_model_name: Original
   epochs: 3
   learning_rate: 2.0e-05
-  batch_size: 8
+  batch_size: 16
   gradient_accumulation_steps: 1
   weight_decay: 0.01
   max_grad_norm: 1.0
   seed: 42
-  precision: fp32
+  precision: auto
   output_dir: /workspace/phishing-detect-output
-  progress_every: 1
+  progress_every: 50
 data:
   train_csv: training.csv
   inference_csv: /workspace/phishing-data/inference/inference.csv
@@ -36,7 +36,7 @@ inference:
   model_revision: main
   positive_label_index: null
   model_dir: null
-  batch_size: 16
+  batch_size: 32
   threshold: 0.5
   max_new_tokens: 32
   do_sample: false

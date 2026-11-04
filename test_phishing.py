@@ -38,6 +38,29 @@ class PhishingTests(unittest.TestCase):
         with patch.object(torch.cuda, 'is_available', return_value=False):
             self.assertEqual(p.configure_device(self.c).type, 'cpu')
 
+    def test_automatic_precision(self):
+        self.c['train']['precision'] = 'auto'
+        self.assertEqual(p.effective_precision(self.c, torch.device('cpu')), 'fp32')
+        with patch.object(torch.cuda, 'is_bf16_supported', return_value=True):
+            self.assertEqual(p.effective_precision(self.c, torch.device('cuda')), 'bf16')
+        with patch.object(torch.cuda, 'is_bf16_supported', return_value=False):
+            self.assertEqual(p.effective_precision(self.c, torch.device('cuda')), 'fp16')
+
+    def test_inference_never_feeds_label_field(self):
+        vocab = self.root / 'vocab.txt'
+        vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nhello\nfriend\n')
+        tokenizer = DistilBertTokenizerFast(vocab_file=str(vocab))
+        rows = [{'text': 'hello friend', 'label': 'SENTINEL_LABEL'}]
+        dataset = p.TextDataset(rows, tokenizer, 'text', 16, labels=None, label_col='label')
+        self.assertEqual(dataset[0], dict(tokenizer('hello friend', truncation=True, max_length=16)))
+        self.assertNotIn('labels', dataset[0])
+        self.assertNotIn('SENTINEL_LABEL', p.prompt_for(self.c, rows[0]['text']))
+        self.c['data']['text_column'] = self.c['data']['label_column']
+        config = self.root / 'invalid.yaml'
+        config.write_text(yaml.safe_dump(self.c))
+        with self.assertRaisesRegex(ValueError, 'prevent label leakage'):
+            p.read_config(config)
+
     def test_url_parsing(self):
         self.assertEqual(p.repository_id('https://huggingface.co/example/model/'), 'example/model')
         with self.assertRaises(ValueError): p.repository_id('https://example.com/model')

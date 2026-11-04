@@ -101,6 +101,8 @@ def read_config(path, train_csv_override=None):
     for key in ('train_csv', 'inference_csv', 'text_column', 'label_column', 'positive_label'):
         if not isinstance(c['data'].get(key), str) or not c['data'][key].strip():
             raise ValueError(f'data.{key} must be a nonempty string')
+    if c['data']['text_column'] == c['data']['label_column']:
+        raise ValueError('data.text_column must differ from data.label_column to prevent label leakage')
     for key in ('train_csv', 'inference_csv', 'eval_csv'):
         if c['data'].get(key):
             path = Path(c['data'][key]).expanduser()
@@ -123,8 +125,8 @@ def read_config(path, train_csv_override=None):
     seed = c['train'].get('seed')
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
         raise ValueError('train.seed must be an integer in [0, 2^32)')
-    if c['train'].get('precision') not in ('fp32', 'fp16', 'bf16'):
-        raise ValueError('train.precision must be fp32, fp16, or bf16')
+    if c['train'].get('precision') not in ('auto', 'fp32', 'fp16', 'bf16'):
+        raise ValueError('train.precision must be auto, fp32, fp16, or bf16')
     inference_model = c['inference'].get('model_source')
     if inference_model is not None and (not isinstance(inference_model, str) or not inference_model.strip()):
         raise ValueError('inference.model_source must be null or a model repository, URL, or local directory')
@@ -215,11 +217,20 @@ def setup_run(config, operation):
 def configure_device(c):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     precision = c['train']['precision']
-    if precision != 'fp32' and device.type != 'cuda':
+    if precision in ('fp16', 'bf16') and device.type != 'cuda':
         raise ValueError('fp16/bf16 requires a CUDA GPU')
     if precision == 'bf16' and not torch.cuda.is_bf16_supported():
         raise ValueError('The selected CUDA GPU does not support bf16')
     return device
+
+
+def effective_precision(c, device):
+    precision = c['train']['precision']
+    if precision == 'auto':
+        if device.type != 'cuda':
+            return 'fp32'
+        return 'bf16' if torch.cuda.is_bf16_supported() else 'fp16'
+    return precision
 
 
 def autocast(device, precision):
@@ -230,7 +241,7 @@ def autocast(device, precision):
 
 def common_metadata(c, device):
     import transformers
-    return {'training_base_model_source': c['train']['model_source'], 'training_base_requested_revision': c['train']['model_revision'], 'torch': torch.__version__, 'transformers': transformers.__version__, 'python': sys.version, 'device': str(device), 'gpu': torch.cuda.get_device_name(0) if device.type == 'cuda' else None, 'seed': c['train']['seed']}
+    return {'training_base_model_source': c['train']['model_source'], 'training_base_requested_revision': c['train']['model_revision'], 'torch': torch.__version__, 'transformers': transformers.__version__, 'python': sys.version, 'device': str(device), 'gpu': torch.cuda.get_device_name(0) if device.type == 'cuda' else None, 'seed': c['train']['seed'], 'effective_precision': effective_precision(c, device)}
 
 
 def make_loader(rows, tokenizer, c, labels=None, shuffle=False, batch_size=None):
@@ -349,7 +360,9 @@ def train(c, out, device):
     accum = settings['gradient_accumulation_steps']
     steps = math.ceil(len(loader) / accum) * settings['epochs']
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=steps)
-    scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda' and settings['precision'] == 'fp16'))
+    precision = effective_precision(c, device)
+    LOG.info('Training precision: %s', precision)
+    scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda' and precision == 'fp16'))
     optimizer.zero_grad(set_to_none=True)
     LOG.info('Starting training: %d records, %d batches per epoch, %d epochs', len(rows), len(loader), settings['epochs'])
     for epoch in range(settings['epochs']):
@@ -359,7 +372,7 @@ def train(c, out, device):
         for i, batch in enumerate(loader):
             batch = {k: v.to(device) for k, v in batch.items()}
             group_size = min(accum, len(loader) - (i // accum) * accum)
-            with autocast(device, settings['precision']):
+            with autocast(device, precision):
                 loss = model(**batch).loss
             if not torch.isfinite(loss):
                 raise RuntimeError('Non-finite training loss; no final model will be saved')
@@ -384,7 +397,7 @@ def train(c, out, device):
             for batch in make_loader(evaluation, tokenizer, c, labels):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 target = batch.pop('labels')
-                with autocast(device, settings['precision']): logits = model(**batch).logits
+                with autocast(device, precision): logits = model(**batch).logits
                 correct += (logits.argmax(dim=-1) == target).sum().item()
                 total += len(target)
         LOG.info('Evaluation accuracy: %.4f (%d/%d)', correct / total, correct, total)
@@ -440,7 +453,7 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
         for offset in range(0, len(rows), size):
             group = rows[offset:offset + size]
             inputs = tokenizer([prompt_for(c, r[c['data']['text_column']]) for r in group], padding=True, truncation=True, max_length=c['data']['max_length'], return_tensors='pt').to(device)
-            with autocast(device, c['train']['precision']):
+            with autocast(device, effective_precision(c, device)):
                 generated = model.generate(**inputs, generation_config=gen)
             if task == 'causal_lm': generated = generated[:, inputs['input_ids'].shape[1]:]
             outputs = tokenizer.batch_decode(generated, skip_special_tokens=True)
@@ -492,7 +505,7 @@ def predict(c, out, device, model_source):
         writer = csv.DictWriter(f, fieldnames=fields + extra)
         writer.writeheader()
         for batch in loader:
-            with autocast(device, c['train']['precision']):
+            with autocast(device, effective_precision(c, device)):
                 logits = model(**{k: v.to(device) for k, v in batch.items()}).logits
             probs = torch.softmax(logits.float(), dim=-1)[:, positive].cpu().tolist()
             for prob in probs:
@@ -533,7 +546,7 @@ def main(forced_action=None):
                 raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
         out = setup_run(c, args.action)
         try:
-            LOG.info('Device: %s%s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)')
+            LOG.info('Device: %s%s; precision: %s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)', effective_precision(c, device))
             if args.action == 'train': train(c, out, device)
             else: predict(c, out, device, args.model_dir)
             (out / 'COMPLETE').write_text('Completed successfully.\n')
