@@ -38,6 +38,14 @@ class PhishingTests(unittest.TestCase):
         with patch.object(torch.cuda, 'is_available', return_value=False):
             self.assertEqual(p.configure_device(self.c).type, 'cpu')
 
+    def test_broken_optional_torchvision_explains_fix(self):
+        with patch.object(p.importlib.util, 'find_spec', return_value=object()), \
+             patch.object(p.importlib, 'import_module', side_effect=RuntimeError('operator torchvision::nms does not exist')):
+            with self.assertRaisesRegex(RuntimeError, 'pip uninstall -y torchvision'):
+                p.check_optional_vision_dependency()
+        with patch.object(p.importlib.util, 'find_spec', return_value=None):
+            p.check_optional_vision_dependency()
+
     def test_automatic_precision(self):
         self.c['train']['precision'] = 'auto'
         self.assertEqual(p.effective_precision(self.c, torch.device('cpu')), 'fp32')
