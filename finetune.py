@@ -543,7 +543,7 @@ def train(c, out, device):
 
 
 def prediction_path(c, out):
-    """Place generated CSVs beside the configured dataset without overwriting it."""
+    """Place each prediction CSV inside its model/checkpoint run folder."""
     return out / 'predictions.csv'
 
 
