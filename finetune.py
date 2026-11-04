@@ -255,7 +255,9 @@ def setup_run(config, operation, model_source=None, checkpoint=None):
     run = out / (operation + '-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
     run.mkdir()
     LOG.setLevel(logging.INFO)
-    LOG.handlers.clear()
+    for handler in LOG.handlers[:]:
+        LOG.removeHandler(handler)
+        handler.close()
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     for handler in (logging.StreamHandler(sys.stdout), logging.FileHandler(run / 'run.log', encoding='utf-8')):
         handler.setFormatter(formatter)
