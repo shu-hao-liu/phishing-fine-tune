@@ -80,7 +80,7 @@ def split(source_path, validation_path, test_path, seed=42, label_column='label'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--input', default=str(ROOT / 'inference.csv'))
+    parser.add_argument('--input', default=str(ROOT / 'data' / 'inference.csv'))
     parser.add_argument('--validation', default=str(ROOT / 'data' / 'validation.csv'))
     parser.add_argument('--test', default=str(ROOT / 'data' / 'test.csv'))
     parser.add_argument('--seed', type=int, default=42)

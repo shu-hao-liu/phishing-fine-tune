@@ -17,7 +17,7 @@ train:
   output_dir: /workspace/phishing-detect-output
   progress_every: 50
 data:
-  train_csv: train.csv
+  train_csv: data/train.csv
   inference_csv: data/test.csv
   eval_csv: data/validation.csv
   text_column: body

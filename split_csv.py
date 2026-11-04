@@ -92,8 +92,8 @@ def split(train_path, inference_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--train', default=str(ROOT / 'train.csv'), help='CSV to split (default: project folder/train.csv)')
-    parser.add_argument('--inference', default=str(ROOT / 'inference.csv'), help='new inference CSV (default: project folder/inference.csv)')
+    parser.add_argument('--train', default=str(ROOT / 'data' / 'train.csv'), help='CSV to split (default: project folder/data/train.csv)')
+    parser.add_argument('--inference', default=str(ROOT / 'data' / 'inference.csv'), help='new inference CSV (default: project folder/data/inference.csv)')
     args = parser.parse_args()
     try:
         train_count, inference_count = split(args.train, args.inference)

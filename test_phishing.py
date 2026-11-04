@@ -66,11 +66,15 @@ class PhishingTests(unittest.TestCase):
         with self.assertRaises(ValueError): p.repository_id('https://example.com/model')
         with self.assertRaises(ValueError): p.repository_id('https://huggingface.co/a/b/tree/main')
 
-    def test_separate_paths(self):
+    def test_same_folder_allowed_but_same_file_rejected(self):
         self.c['data']['inference_csv'] = str(self.root / 'train' / 'infer.csv')
         config = self.root / 'test.yaml'
         config.write_text(yaml.safe_dump(self.c))
-        with self.assertRaisesRegex(ValueError, 'different directories'): p.read_config(config)
+        p.read_config(config)
+        self.c['data']['inference_csv'] = self.c['data']['train_csv']
+        config.write_text(yaml.safe_dump(self.c))
+        with self.assertRaisesRegex(ValueError, 'different files'):
+            p.read_config(config)
 
     def test_csv_validation(self):
         bad = self.root / 'bad.csv'

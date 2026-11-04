@@ -112,8 +112,8 @@ def read_config(path, train_csv_override=None):
             c['data'][key] = str((ROOT / path).resolve() if not path.is_absolute() else path.resolve())
     train = Path(c['data']['train_csv'])
     inference = Path(c['data']['inference_csv'])
-    if train == inference or train.parent == inference.parent:
-        raise ValueError('Training and inference CSVs must be in different directories')
+    if train == inference:
+        raise ValueError('Training and inference CSVs must be different files')
     if c['data'].get('eval_csv') and Path(c['data']['eval_csv']).expanduser().resolve() in (train, inference):
         raise ValueError('Evaluation CSV must differ from training and inference CSVs')
     for sec, key in [('data', 'max_length'), ('train', 'epochs'), ('train', 'batch_size'), ('train', 'gradient_accumulation_steps'), ('inference', 'batch_size')]:
