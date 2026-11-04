@@ -38,6 +38,19 @@ class PhishingTests(unittest.TestCase):
         with patch.object(torch.cuda, 'is_available', return_value=False):
             self.assertEqual(p.configure_device(self.c).type, 'cpu')
 
+    def test_test_command_always_uses_test_csv(self):
+        # Even a saved legacy configuration cannot redirect the test command.
+        self.c['data']['inference_csv'] = str(self.root / 'wrong.csv')
+        with patch.object(p, 'read_config', return_value=self.c), \
+             patch.object(p, 'configure_device', return_value=torch.device('cpu')), \
+             patch.object(p, 'check_optional_vision_dependency'), \
+             patch.object(p, 'setup_run', return_value=self.root), \
+             patch.object(p, 'predict', return_value=self.root / 'predictions.csv') as predict, \
+             patch.object(p, 'save_prediction_metrics'), \
+             patch('sys.argv', ['test.py']):
+            self.assertEqual(p.main('test'), 0)
+        self.assertEqual(predict.call_args.args[0]['data']['inference_csv'], str((p.ROOT / 'data' / 'test.csv').resolve()))
+
     def test_broken_optional_torchvision_explains_fix(self):
         with patch.object(p.importlib.util, 'find_spec', return_value=object()), \
              patch.object(p.importlib, 'import_module', side_effect=RuntimeError('operator torchvision::nms does not exist')):

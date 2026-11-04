@@ -790,6 +790,7 @@ def main(forced_action=None):
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
         if args.action == 'test':
+            c['data']['inference_csv'] = str((ROOT / 'data' / 'test.csv').resolve())
             c['data']['selected_dataset'] = 'test'
             args.model_dir = c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():
@@ -803,6 +804,7 @@ def main(forced_action=None):
             LOG.info('Device: %s%s; precision: %s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)', effective_precision(c, device))
             if args.action == 'train': train(c, out, device)
             else:
+                LOG.info('Testing data: %s', c['data']['inference_csv'])
                 predictions = predict(c, out, device, args.model_dir, checkpoint)
                 save_prediction_metrics(c, out, predictions)
             (out / 'COMPLETE').write_text('Completed successfully.\n')
