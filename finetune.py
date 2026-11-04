@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -68,6 +69,8 @@ def resolve_model_source(source, revision, cache_dir, require_exists=True):
             path = named_path
         is_local = path.is_dir() or source.startswith(('/', './', '../', '~'))
     if is_local:
+        if (path / 'final').is_dir():
+            path = path / 'final'
         if require_exists and not path.is_dir():
             raise FileNotFoundError(f'Model directory not found: {path}')
         return str(path.resolve()), {'local_files_only': True, 'trust_remote_code': False}
@@ -154,6 +157,9 @@ def read_config(path, train_csv_override=None):
     resume = c['train'].get('resume_from')
     if resume is not None and (not isinstance(resume, str) or not resume.strip()):
         raise ValueError('train.resume_from must be null or a checkpoint path')
+    checkpoint = c['inference'].get('checkpoint')
+    if checkpoint is not None and (not isinstance(checkpoint, str) or not checkpoint.strip()):
+        raise ValueError('inference.checkpoint must be null or a checkpoint path')
     progress = c['train'].get('progress_every', 1)
     if isinstance(progress, bool) or not isinstance(progress, int) or progress < 1:
         raise ValueError('train.progress_every must be a positive integer')
@@ -204,8 +210,38 @@ class TextDataset(Dataset):
         return item
 
 
-def setup_run(config, operation):
+def safe_path_label(value):
+    label = re.sub(r'[^A-Za-z0-9._-]+', '-', str(value)).strip('.-')
+    return label[:100] or 'model'
+
+
+def inference_labels(config, model_source, checkpoint=None):
+    if checkpoint:
+        cp = Path(checkpoint).expanduser()
+        if cp.parent.parent.name == 'checkpoints':
+            return safe_path_label(cp.parent.parent.parent.name), safe_path_label(cp.stem)
+    if model_source.startswith('local:'):
+        model = model_source[len('local:'):]
+    elif model_source.startswith('fine-tuned-weights/'):
+        model = model_source[len('fine-tuned-weights/'):]
+    elif '://' in model_source:
+        model = repository_id(model_source).replace('/', '--')
+    else:
+        path = Path(model_source).expanduser()
+        if path.is_dir():
+            model = path.parent.name if path.name == 'final' else path.name
+        else:
+            model = model_source.replace('/', '--')
+    return safe_path_label(model), safe_path_label(Path(checkpoint).stem if checkpoint else 'final')
+
+
+def setup_run(config, operation, model_source=None, checkpoint=None):
     out = Path(config['train' if operation == 'train' else 'inference']['output_dir']).expanduser()
+    if operation == 'train':
+        out = out / safe_path_label(config['train']['output_model_name']) / 'training'
+    elif operation == 'predict':
+        model_label, checkpoint_label = inference_labels(config, model_source, checkpoint)
+        out = out / model_label / checkpoint_label
     out.mkdir(parents=True, exist_ok=True)
     run = out / (operation + '-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
     run.mkdir()
@@ -356,9 +392,10 @@ def save_checkpoint(path, state):
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['train']
-    model_dir = WEIGHTS_ROOT / validate_model_name(settings['output_model_name'])
-    if model_dir.exists():
-        raise FileExistsError(f'Trained model directory already exists: {model_dir}; choose a different output_model_name')
+    model_root = WEIGHTS_ROOT / validate_model_name(settings['output_model_name'])
+    model_dir = model_root / 'final'
+    if (model_root.exists() and not settings.get('resume_from')) or model_dir.exists() or (model_root / 'config.json').exists():
+        raise FileExistsError(f'Trained model directory already exists: {model_root}; choose a different output_model_name')
     LOG.info('Reading training data: %s', data['train_csv'])
     _, rows = read_csv(data['train_csv'], data['text_column'], data['label_column'])
     train_hash = sha256(data['train_csv'])
@@ -448,7 +485,7 @@ def train(c, out, device):
             if i == 0 or (i + 1) % settings.get('progress_every', 1) == 0 or i + 1 == len(loader):
                 LOG.info('Epoch %d/%d batch %d/%d loss %.6f', epoch + 1, settings['epochs'], i + 1, len(loader), loss.item())
         LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
-        checkpoint_path = out / 'checkpoints' / f'epoch-{epoch + 1:03d}.pt'
+        checkpoint_path = model_root / 'checkpoints' / out.name / f'epoch-{epoch + 1:03d}.pt'
         save_checkpoint(checkpoint_path, {'format_version': 1, 'epoch': epoch + 1, 'identity': identity,
                         'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                         'scheduler': scheduler.state_dict(), 'scaler': scaler.state_dict(),
@@ -475,7 +512,7 @@ def train(c, out, device):
         metrics.update({'positive_label': data['positive_label'], 'threshold': c['inference']['threshold']})
         LOG.info('Validation metrics: %s', json.dumps(metrics))
         (out / 'evaluation.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
-    WEIGHTS_ROOT.mkdir(parents=True, exist_ok=True)
+    model_root.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(exist_ok=False)
     try:
         model.save_pretrained(model_dir)
@@ -491,7 +528,7 @@ def train(c, out, device):
 
 def prediction_path(c, out):
     """Place generated CSVs beside the configured dataset without overwriting it."""
-    return Path(c['data']['inference_csv']).parent / f'{out.name}-predictions.csv'
+    return out / 'predictions.csv'
 
 
 def predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task):
@@ -623,6 +660,7 @@ def main(forced_action=None):
         prediction = sub.add_parser('predict', help='classify the separate inference CSV')
         prediction.add_argument('--model-dir', help='override inference model source in config')
         prediction.add_argument('--dataset', choices=('validation', 'test'), default='test')
+        prediction.add_argument('--checkpoint', help='use an epoch checkpoint file for inference')
     elif forced_action == 'train':
         parser.add_argument('--train-csv', help='override data.train_csv in the shared config')
         parser.add_argument('--resume', help='resume training from an epoch checkpoint')
@@ -630,6 +668,7 @@ def main(forced_action=None):
     elif forced_action == 'predict':
         parser.add_argument('--model-dir', help='override inference model source in config')
         parser.add_argument('--dataset', choices=('validation', 'test'), default='test')
+        parser.add_argument('--checkpoint', help='use an epoch checkpoint file for inference')
     args = parser.parse_args()
     if forced_action is not None:
         args.action = 'check' if forced_action == 'train' and args.check else forced_action
@@ -650,12 +689,13 @@ def main(forced_action=None):
             args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():
                 raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
-        out = setup_run(c, args.action)
+        checkpoint = (getattr(args, 'checkpoint', None) or c['inference'].get('checkpoint')) if args.action == 'predict' else None
+        out = setup_run(c, args.action, getattr(args, 'model_dir', None), checkpoint)
         try:
             LOG.info('Device: %s%s; precision: %s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)', effective_precision(c, device))
             if args.action == 'train': train(c, out, device)
             else:
-                predictions = predict(c, out, device, args.model_dir)
+                predictions = predict(c, out, device, args.model_dir, checkpoint)
                 save_prediction_metrics(c, out, predictions)
             (out / 'COMPLETE').write_text('Completed successfully.\n')
         except Exception:

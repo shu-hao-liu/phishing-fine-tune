@@ -37,6 +37,7 @@ inference:
   model_revision: main
   positive_label_index: null
   model_dir: null
+  checkpoint: null  # Optional path to an epoch-NNN.pt file.
   batch_size: 32
   threshold: 0.5
   max_new_tokens: 32
