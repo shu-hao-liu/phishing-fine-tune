@@ -161,6 +161,11 @@ class PhishingTests(unittest.TestCase):
                 self.assertEqual(len(rows), 2)
                 self.assertIn('model_response', rows[0])
                 self.assertEqual(json.loads((out / 'metadata.json').read_text())['task'], task)
+                checkpoint_out = self.root / ('checkpoint-pred-' + task)
+                checkpoint_out.mkdir()
+                checkpoint = p.WEIGHTS_ROOT / task / 'checkpoints' / run.name / 'epoch-001.pt'
+                p.predict(self.c, checkpoint_out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task), str(checkpoint))
+                self.assertEqual(json.loads((checkpoint_out / 'metadata.json').read_text())['checkpoint'], str(checkpoint))
 
     def test_training_and_inference_offline(self):
         vocab = self.root / 'vocab.txt'
