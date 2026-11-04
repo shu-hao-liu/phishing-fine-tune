@@ -354,11 +354,7 @@ def make_generative_loader(rows, tokenizer, c, task, model, shuffle=False):
     return DataLoader(ds, batch_size=c['train']['batch_size'], shuffle=shuffle, collate_fn=collator)
 
 
-def checkpoint_identity(c, model, tokenizer, task, device, labels, data_hash):
-    settings, data = c['train'], c['data']
-    training_keys = ('model_source', 'model_revision', 'trust_remote_code', 'epochs', 'learning_rate',
-                     'batch_size', 'gradient_accumulation_steps', 'weight_decay', 'max_grad_norm', 'seed')
-    data_keys = ('text_column', 'label_column', 'positive_label', 'max_length', 'prompt_template')
+def model_tokenizer_fingerprints(model, tokenizer):
     tokenizer_info = {'vocab': tokenizer.get_vocab(), 'special_tokens': tokenizer.special_tokens_map}
     if getattr(tokenizer, 'backend_tokenizer', None) is not None:
         tokenizer_info['backend'] = tokenizer.backend_tokenizer.to_str()
@@ -366,6 +362,15 @@ def checkpoint_identity(c, model, tokenizer, task, device, labels, data_hash):
     model_config = model.config.to_dict()
     model_config.pop('_name_or_path', None)
     config_hash = hashlib.sha256(json.dumps(model_config, sort_keys=True, default=str).encode()).hexdigest()
+    return config_hash, tokenizer_hash
+
+
+def checkpoint_identity(c, model, tokenizer, task, device, labels, data_hash):
+    settings, data = c['train'], c['data']
+    training_keys = ('model_source', 'model_revision', 'trust_remote_code', 'epochs', 'learning_rate',
+                     'batch_size', 'gradient_accumulation_steps', 'weight_decay', 'max_grad_norm', 'seed')
+    data_keys = ('text_column', 'label_column', 'positive_label', 'max_length', 'prompt_template')
+    config_hash, tokenizer_hash = model_tokenizer_fingerprints(model, tokenizer)
     return {'training': {k: settings.get(k) for k in training_keys},
             'data': {k: data.get(k) for k in data_keys}, 'train_csv_sha256': data_hash,
             'task': task, 'labels': labels, 'device_type': device.type,
@@ -531,14 +536,58 @@ def prediction_path(c, out):
     return out / 'predictions.csv'
 
 
-def predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task):
+def load_epoch_model(checkpoint_path, c):
+    """Restore epoch weights for inference from the checkpoint and its base model."""
+    from transformers import AutoModelForSequenceClassification, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    if checkpoint.get('format_version') != 1 or not isinstance(checkpoint.get('identity'), dict):
+        raise ValueError('Unrecognized checkpoint format')
+    identity = checkpoint['identity']
+    task = identity['task']
+    requested = c['inference'].get('task', 'auto')
+    if requested not in ('auto', task):
+        raise ValueError('Configured inference task does not match checkpoint task')
+    training = identity['training']
+    reference, opts = resolve_model_source(training['model_source'], training['model_revision'], c['inference']['cache_dir'])
+    opts['trust_remote_code'] = c['inference'].get('trust_remote_code', False)
+    if not opts.get('local_files_only') and identity.get('model_commit'):
+        opts['revision'] = identity['model_commit']
+    tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
+    if tokenizer.pad_token is None:
+        if tokenizer.eos_token is None:
+            raise ValueError('Checkpoint tokenizer has no padding or EOS token')
+        tokenizer.pad_token = tokenizer.eos_token
+    if task == 'classification':
+        labels = identity['labels']
+        if not isinstance(labels, dict) or set(labels.values()) != {0, 1}:
+            raise ValueError('Checkpoint does not contain a binary label mapping')
+        id2label = {index: label for label, index in labels.items()}
+        model = AutoModelForSequenceClassification.from_pretrained(reference, num_labels=2, id2label=id2label, label2id=labels, **opts)
+    elif task in ('causal_lm', 'seq2seq'):
+        cls = AutoModelForCausalLM if task == 'causal_lm' else AutoModelForSeq2SeqLM
+        model = cls.from_pretrained(reference, **opts)
+    else:
+        raise ValueError('Unsupported checkpoint task')
+    model.config.phishing_task = task
+    model.config.pad_token_id = tokenizer.pad_token_id
+    config_hash, tokenizer_hash = model_tokenizer_fingerprints(model, tokenizer)
+    if config_hash != identity['model_config_sha256'] or tokenizer_hash != identity['tokenizer_sha256']:
+        raise ValueError('Checkpoint base model or tokenizer has changed; use the original revision')
+    model.load_state_dict(checkpoint['model'])
+    return model, tokenizer, task, reference, opts
+
+
+def predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task, loaded_model=None, checkpoint_path=None):
     from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
     if 'model_response' in fields:
         raise ValueError('Inference CSV already contains model_response')
     cls = AutoModelForCausalLM if task == 'causal_lm' else AutoModelForSeq2SeqLM
-    model, info = cls.from_pretrained(reference, output_loading_info=True, **opts)
-    if info['missing_keys'] or info['mismatched_keys'] or info['error_msgs']:
-        raise ValueError('Inference model weights are incomplete')
+    if loaded_model is None:
+        model, info = cls.from_pretrained(reference, output_loading_info=True, **opts)
+        if info['missing_keys'] or info['mismatched_keys'] or info['error_msgs']:
+            raise ValueError('Inference model weights are incomplete')
+    else:
+        model = loaded_model
     model = model.to(device).eval()
     if tokenizer.pad_token is None:
         if tokenizer.eos_token is None:
@@ -576,28 +625,35 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
             for row, response in zip(group, outputs):
                 writer.writerow({**row, 'model_response': response})
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': inf.get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'generation_settings': settings, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': inf.get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'generation_settings': settings, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d generated responses to %s', len(rows), output)
     return output
 
 
-def predict(c, out, device, model_source):
+def predict(c, out, device, model_source, checkpoint_path=None):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     data = c['data']
     fields, rows = read_csv(data['inference_csv'], data['text_column'])
-    reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['inference']['cache_dir'])
-    opts['trust_remote_code'] = c['inference'].get('trust_remote_code', False)
-    task = select_task(reference, opts, c['inference'].get('task', 'auto'))
-    tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
+    loaded_model = None
+    if checkpoint_path:
+        loaded_model, tokenizer, task, reference, opts = load_epoch_model(checkpoint_path, c)
+    else:
+        reference, opts = resolve_model_source(model_source, c['inference'].get('model_revision', 'main'), c['inference']['cache_dir'])
+        opts['trust_remote_code'] = c['inference'].get('trust_remote_code', False)
+        task = select_task(reference, opts, c['inference'].get('task', 'auto'))
+        tokenizer = AutoTokenizer.from_pretrained(reference, **opts)
     if task != 'classification':
-        return predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task)
+        return predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task, loaded_model, checkpoint_path)
     extra = ['predicted_label', 'phishing_probability']
     if any(x in fields for x in extra):
         raise ValueError(f'Inference CSV already contains an output column: {extra}')
-    model, loading_info = AutoModelForSequenceClassification.from_pretrained(reference, output_loading_info=True, **opts)
-    if loading_info['missing_keys'] or loading_info['mismatched_keys'] or loading_info['error_msgs']:
-        raise ValueError('Inference model did not load all classifier weights; choose an already trained binary classifier')
+    if loaded_model is not None:
+        model = loaded_model
+    else:
+        model, loading_info = AutoModelForSequenceClassification.from_pretrained(reference, output_loading_info=True, **opts)
+        if loading_info['missing_keys'] or loading_info['mismatched_keys'] or loading_info['error_msgs']:
+            raise ValueError('Inference model did not load all classifier weights; choose an already trained binary classifier')
     model = model.to(device)
     if tokenizer.pad_token is None:
         if tokenizer.eos_token is None:
@@ -629,7 +685,7 @@ def predict(c, out, device, model_source):
                 writer.writerow({**rows[offset], 'predicted_label': labels[positive if prob >= c['inference']['threshold'] else negative], 'phishing_probability': prob})
                 offset += 1
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'positive_label_index': positive, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'positive_label_index': positive, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d predictions to %s', offset, output)
     return output
