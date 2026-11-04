@@ -113,6 +113,9 @@ class PhishingTests(unittest.TestCase):
         checkpoint_out.mkdir()
         prediction = p.predict(self.c, checkpoint_out, torch.device('cpu'), 'local:resumed', self.c['train']['resume_from'])
         self.assertTrue(prediction.exists())
+        loaded_model, _, _, _, _ = p.load_epoch_model(self.c['train']['resume_from'], self.c)
+        saved_state = torch.load(self.c['train']['resume_from'], map_location='cpu', weights_only=False)['model']
+        self.assertTrue(all(torch.equal(loaded_model.state_dict()[key], value) for key, value in saved_state.items()))
         result = json.loads((checkpoint_out / 'metadata.json').read_text())
         self.assertTrue(result['checkpoint'].endswith('epoch-001.pt'))
         self.assertEqual(p.inference_labels(self.c, 'local:resumed', self.c['train']['resume_from']), ('resumed', 'epoch-001'))
@@ -183,7 +186,7 @@ class PhishingTests(unittest.TestCase):
         p.setup_run(self.c, 'test')
         with patch.object(AutoTokenizer, 'from_pretrained', return_value=tokenizer), patch.object(AutoModelForSequenceClassification, 'from_pretrained', return_value=model):
             p.train(self.c, train_dir, torch.device('cpu'))
-        validation_metrics = json.loads((train_dir / 'evaluation.json').read_text())
+        validation_metrics = json.loads((train_dir / 'evaluation-epoch-001.json').read_text())
         self.assertEqual(validation_metrics['count'], 2)
         self.assertTrue({'accuracy', 'precision', 'recall', 'f1'} <= set(validation_metrics))
         pred_dir = self.root / 'predicted'

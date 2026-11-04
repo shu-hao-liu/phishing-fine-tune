@@ -211,8 +211,11 @@ class TextDataset(Dataset):
 
 
 def safe_path_label(value):
-    label = re.sub(r'[^A-Za-z0-9._-]+', '-', str(value)).strip('.-')
-    return label[:100] or 'model'
+    original = str(value)
+    label = re.sub(r'[^A-Za-z0-9._-]+', '-', original).strip('.-') or 'model'
+    if label != original or len(label) > 100:
+        label = label[:90] + '-' + hashlib.sha256(original.encode()).hexdigest()[:8]
+    return label
 
 
 def inference_labels(config, model_source, checkpoint=None):
@@ -514,9 +517,9 @@ def train(c, out, device):
                 tn += (~predicted & ~positive).sum().item()
                 fn += (~predicted & positive).sum().item()
         metrics = calculate_metrics(tp, fp, tn, fn)
-        metrics.update({'positive_label': data['positive_label'], 'threshold': c['inference']['threshold']})
+        metrics.update({'positive_label': data['positive_label'], 'threshold': c['inference']['threshold'], 'checkpoint': f'epoch-{settings["epochs"]:03d}'})
         LOG.info('Validation metrics: %s', json.dumps(metrics))
-        (out / 'evaluation.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
+        (out / f'evaluation-epoch-{settings["epochs"]:03d}.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
     model_root.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(exist_ok=False)
     try:
@@ -744,7 +747,10 @@ def main(forced_action=None):
             c['data']['selected_dataset'] = args.dataset
             args.model_dir = args.model_dir or c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():
-                raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
+                if getattr(args, 'checkpoint', None) or c['inference'].get('checkpoint'):
+                    args.model_dir = 'checkpoint'
+                else:
+                    raise ValueError('Set inference.model_source or inference.model_dir in config.yaml, or pass --model-dir')
         checkpoint = (getattr(args, 'checkpoint', None) or c['inference'].get('checkpoint')) if args.action == 'predict' else None
         out = setup_run(c, args.action, getattr(args, 'model_dir', None), checkpoint)
         try:
