@@ -61,6 +61,16 @@ class PhishingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'prevent label leakage'):
             p.read_config(config)
 
+    def test_output_folders_identify_model_and_checkpoint(self):
+        self.assertEqual(p.inference_labels(self.c, 'local:Original'), ('Original', 'final'))
+        self.assertEqual(p.inference_labels(self.c, 'org/model'), ('org--model', 'revision-main'))
+        checkpoint = p.WEIGHTS_ROOT / 'Original' / 'checkpoints' / 'train-123' / 'epoch-002.pt'
+        self.assertEqual(p.inference_labels(self.c, 'local:Original', str(checkpoint)), ('Original', 'epoch-002'))
+        out = p.setup_run(self.c, 'predict', 'local:Original', str(checkpoint))
+        self.assertEqual(out.parent.name, 'epoch-002')
+        self.assertEqual(out.parent.parent.name, 'Original')
+        self.assertEqual(p.prediction_path(self.c, out).parent, out)
+
     def test_url_parsing(self):
         self.assertEqual(p.repository_id('https://huggingface.co/example/model/'), 'example/model')
         with self.assertRaises(ValueError): p.repository_id('https://example.com/model')

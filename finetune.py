@@ -235,7 +235,13 @@ def inference_labels(config, model_source, checkpoint=None):
             model = path.parent.name if path.name == 'final' else path.name
         else:
             model = model_source.replace('/', '--')
-    return safe_path_label(model), safe_path_label(Path(checkpoint).stem if checkpoint else 'final')
+    if checkpoint:
+        version = Path(checkpoint).stem
+    elif model_source.startswith(('local:', 'fine-tuned-weights/', '/', './', '../', '~')) or Path(model_source).expanduser().is_dir():
+        version = 'final'
+    else:
+        version = 'revision-' + config['inference'].get('model_revision', 'main')
+    return safe_path_label(model), safe_path_label(version)
 
 
 def setup_run(config, operation, model_source=None, checkpoint=None):
@@ -628,7 +634,7 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
             for row, response in zip(group, outputs):
                 writer.writerow({**row, 'model_response': response})
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': inf.get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'generation_settings': settings, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': opts.get('revision') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'generation_settings': settings, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d generated responses to %s', len(rows), output)
     return output
@@ -688,7 +694,7 @@ def predict(c, out, device, model_source, checkpoint_path=None):
                 writer.writerow({**rows[offset], 'predicted_label': labels[positive if prob >= c['inference']['threshold'] else negative], 'phishing_probability': prob})
                 offset += 1
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'positive_label_index': positive, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': opts.get('revision') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'positive_label_index': positive, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d predictions to %s', offset, output)
     return output
