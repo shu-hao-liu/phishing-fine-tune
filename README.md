@@ -77,3 +77,7 @@ python3 split_csv.py
 This removes the last 20% of data records from `train.csv` in the project folder and writes them to a new `inference.csv` in that folder. Both files keep the original header and record text; no rows are shuffled or modified. If 20% is not a whole number of records, the holdout count is rounded up. The tool does not overwrite an existing `inference.csv`.
 
 To use other paths, run `python3 split_csv.py --train /path/to/train.csv --inference /path/to/inference.csv`. Update `data.train_csv` and `data.inference_csv` in `config.yaml` to those paths; the training and inference CSVs must be in different directories for the experiment. The splitter does not modify the configuration.
+
+## Keep the six data columns
+
+Run `python3 clean_csv.py` to clean the project folder's `train.csv` and `inference.csv`. It keeps `subject`, `body`, `urls`, `label`, `language`, and `source`, in that order, preserving the value and order of each record. Originals are retained as `train.original.csv` and `inference.original.csv`; existing backups are never overwritten. The tool rejects missing columns or malformed rows without replacing that file. It processes files one at a time, so if the second fails, the first may already be cleaned. Pass paths as arguments to clean other CSV files.
