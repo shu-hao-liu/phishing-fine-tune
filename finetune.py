@@ -489,6 +489,11 @@ def train(c, out, device):
     LOG.info('Saved trained model to %s', model_dir)
 
 
+def prediction_path(c, out):
+    """Place generated CSVs beside the configured dataset without overwriting it."""
+    return Path(c['data']['inference_csv']).parent / f'{out.name}-predictions.csv'
+
+
 def predict_generative(c, out, device, model_source, reference, opts, tokenizer, fields, rows, task):
     from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
     if 'model_response' in fields:
@@ -519,7 +524,8 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
     random.seed(seed)
     torch.manual_seed(seed)
     if device.type == 'cuda': torch.cuda.manual_seed_all(seed)
-    with (out / 'predictions.csv').open('w', newline='', encoding='utf-8') as f, torch.inference_mode():
+    output = prediction_path(c, out)
+    with output.open('x', newline='', encoding='utf-8') as f, torch.inference_mode():
         writer = csv.DictWriter(f, fieldnames=fields + ['model_response'])
         writer.writeheader()
         size = inf['batch_size']
@@ -533,9 +539,10 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
             for row, response in zip(group, outputs):
                 writer.writerow({**row, 'model_response': response})
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': inf.get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'generation_settings': settings, 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': inf.get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'generation_settings': settings, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
-    LOG.info('Saved %d generated responses to %s', len(rows), out / 'predictions.csv')
+    LOG.info('Saved %d generated responses to %s', len(rows), output)
+    return output
 
 
 def predict(c, out, device, model_source):
@@ -572,9 +579,9 @@ def predict(c, out, device, model_source):
     negative = 1 - positive
     loader = make_loader(rows, tokenizer, c, batch_size=c['inference']['batch_size'])
     model.eval()
-    output = out / 'predictions.csv'
+    output = prediction_path(c, out)
     offset = 0
-    with output.open('w', newline='', encoding='utf-8') as f, torch.inference_mode():
+    with output.open('x', newline='', encoding='utf-8') as f, torch.inference_mode():
         writer = csv.DictWriter(f, fieldnames=fields + extra)
         writer.writeheader()
         for batch in loader:
@@ -585,13 +592,13 @@ def predict(c, out, device, model_source):
                 writer.writerow({**rows[offset], 'predicted_label': labels[positive if prob >= c['inference']['threshold'] else negative], 'phishing_probability': prob})
                 offset += 1
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'positive_label_index': positive, 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': c['inference'].get('model_revision', 'main') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'positive_label_index': positive, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d predictions to %s', offset, output)
+    return output
 
 
-def save_prediction_metrics(c, out):
-    path = out / 'predictions.csv'
+def save_prediction_metrics(c, out, path):
     with path.open(encoding='utf-8-sig', newline='') as f:
         fields = csv.DictReader(f).fieldnames or []
     if c['data']['label_column'] not in fields:
@@ -648,8 +655,8 @@ def main(forced_action=None):
             LOG.info('Device: %s%s; precision: %s', device, f' ({torch.cuda.get_device_name(device)})' if device.type == 'cuda' else ' (CUDA unavailable; using CPU)', effective_precision(c, device))
             if args.action == 'train': train(c, out, device)
             else:
-                predict(c, out, device, args.model_dir)
-                save_prediction_metrics(c, out)
+                predictions = predict(c, out, device, args.model_dir)
+                save_prediction_metrics(c, out, predictions)
             (out / 'COMPLETE').write_text('Completed successfully.\n')
         except Exception:
             LOG.exception('Run failed')

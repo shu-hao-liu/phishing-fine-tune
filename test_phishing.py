@@ -147,8 +147,9 @@ class PhishingTests(unittest.TestCase):
                 p.train(self.c, run, torch.device('cpu'))
                 out = self.root / ('pred-' + task)
                 out.mkdir()
-                p.predict(self.c, out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task))
-                with (out / 'predictions.csv').open(newline='') as f:
+                prediction = p.predict(self.c, out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task))
+                self.assertEqual(prediction.parent, (self.root / 'infer'))
+                with prediction.open(newline='') as f:
                     rows = list(csv.DictReader(f))
                 self.assertEqual(len(rows), 2)
                 self.assertIn('model_response', rows[0])
@@ -175,10 +176,10 @@ class PhishingTests(unittest.TestCase):
         self.assertTrue({'accuracy', 'precision', 'recall', 'f1'} <= set(validation_metrics))
         pred_dir = self.root / 'predicted'
         pred_dir.mkdir()
-        p.predict(self.c, pred_dir, torch.device('cpu'), str(p.WEIGHTS_ROOT / 'Model-1'))
-        with (pred_dir / 'predictions.csv').open(newline='') as f: rows = list(csv.DictReader(f))
+        prediction = p.predict(self.c, pred_dir, torch.device('cpu'), str(p.WEIGHTS_ROOT / 'Model-1'))
+        with prediction.open(newline='') as f: rows = list(csv.DictReader(f))
         self.assertEqual([r['id'] for r in rows], ['1', '2'])
-        p.save_prediction_metrics(self.c, pred_dir)
+        p.save_prediction_metrics(self.c, pred_dir, prediction)
         self.assertEqual(json.loads((pred_dir / 'metrics.json').read_text())['count'], 2)
         self.assertTrue(all(r['predicted_label'] in ('legitimate', 'phishing') and 0 <= float(r['phishing_probability']) <= 1 for r in rows))
         self.assertTrue((p.WEIGHTS_ROOT / 'Model-1' / 'config.json').exists())
