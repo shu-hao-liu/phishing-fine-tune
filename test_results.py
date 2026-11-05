@@ -1,4 +1,7 @@
 import csv
+import json
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,6 +24,17 @@ class ResultsTests(unittest.TestCase):
         self.assertAlmostEqual(m['f1'], 2 / 3)
         self.assertIsNone(calculate_metrics(0, 0, 3, 2)['precision'])
         self.assertEqual(calculate_metrics(0, 0, 3, 2)['f1'], 0.0)
+
+    def test_asymmetric_confusion_matrix_and_cli(self):
+        path = self.root / 'predictions.csv'
+        path.write_text('label,predicted_label\n' + '1.0,1.0\n' * 3 + '0.0,1.0\n' + '0.0,0.0\n' * 4 + '1.0,0.0\n' * 2)
+        metrics = analyze_predictions(path, 'label', '1.0')
+        self.assertEqual((metrics['true_positives'], metrics['false_positives'], metrics['true_negatives'], metrics['false_negatives']), (3, 1, 4, 2))
+        self.assertEqual((metrics['accuracy'], metrics['precision'], metrics['recall']), (0.7, 0.75, 0.6))
+        self.assertAlmostEqual(metrics['f1'], 2 / 3)
+        result = subprocess.run([sys.executable, str(Path(__file__).parent / 'analyze_results.py'), str(path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((self.root / 'metrics.json').read_text()), metrics)
 
     def test_analyzer_rejects_unknown_labels(self):
         path = self.root / 'predictions.csv'

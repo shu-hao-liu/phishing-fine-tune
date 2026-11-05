@@ -62,15 +62,16 @@ def analyze_predictions(path, label_column, positive_label, prediction_column=No
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('predictions', help='predictions.csv produced by inference.py')
+    parser.add_argument('predictions', help='predictions.csv produced by test.py')
     parser.add_argument('--config', default=str(ROOT / 'config.yaml'))
     parser.add_argument('--prediction-column', default=None)
     parser.add_argument('--output', default=None, help='JSON output path (default: metrics.json next to predictions)')
     args = parser.parse_args()
     try:
         with open(args.config, encoding='utf-8') as f:
-            data = yaml.safe_load(f)['data']
-        metrics = analyze_predictions(args.predictions, data['label_column'], data['positive_label'], args.prediction_column)
+            config = yaml.safe_load(f)
+        data = config.get('data', config.get('train', {}))
+        metrics = analyze_predictions(args.predictions, data.get('label_column', 'label'), str(data.get('positive_label', '1.0')), args.prediction_column)
         output = Path(args.output) if args.output else Path(args.predictions).with_name('metrics.json')
         with output.open('x', encoding='utf-8') as f:
             json.dump(metrics, f, indent=2)
