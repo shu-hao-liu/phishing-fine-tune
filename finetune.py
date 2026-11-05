@@ -26,7 +26,8 @@ import yaml
 from analyze_results import analyze_predictions, calculate_metrics
 
 ROOT = Path(__file__).resolve().parent
-WEIGHTS_ROOT = Path('/workspace/fine-tuned-weights')
+MODEL_ROOT = Path('/workspace')
+WEIGHTS_ROOT = Path('/workspace/fine-tuned-weights')  # Previous layout
 OUTPUT_ROOT = Path('/workspace/phishing-detect-output')
 CACHE_ROOT = '/tmp/phishing-detect-hf-cache'
 LOG = logging.getLogger('phishing')
@@ -53,6 +54,17 @@ def validate_model_name(name):
     return name
 
 
+def named_weights_path(name):
+    name = validate_model_name(name)
+    new = MODEL_ROOT / name / 'weights'
+    old = WEIGHTS_ROOT / name
+    if (new / 'final').is_dir() or (new / 'config.json').is_file():
+        return new
+    if (old / 'final').is_dir() or (old / 'config.json').is_file():
+        return old
+    return new
+
+
 def resolve_model_source(source, revision, cache_dir, require_exists=True):
     """Use a local directory or a Hub repository without silently substituting."""
     if not isinstance(source, str) or not source.strip():
@@ -60,16 +72,16 @@ def resolve_model_source(source, revision, cache_dir, require_exists=True):
     source = source.strip()
     if source.startswith('local:'):
         name = validate_model_name(source[len('local:'):])
-        path = WEIGHTS_ROOT / name
+        path = named_weights_path(name)
         is_local = True
     elif source.startswith('fine-tuned-weights/'):
         name = validate_model_name(source[len('fine-tuned-weights/'):])
-        path = WEIGHTS_ROOT / name
+        path = named_weights_path(name)
         is_local = True
     else:
         path = Path(source).expanduser()
-        named_path = WEIGHTS_ROOT / source
-        if not source.startswith(('http://', 'https://')) and '/' not in source and named_path.is_dir():
+        named_path = named_weights_path(source) if not source.startswith(('http://', 'https://')) and '/' not in source and source not in ('.', '..') else None
+        if named_path is not None and named_path.is_dir():
             path = named_path
         is_local = path.is_dir() or source.startswith(('/', './', '../', '~'))
     if is_local:
@@ -248,7 +260,9 @@ def inference_labels(config, model_source, checkpoint=None):
     if checkpoint:
         cp = Path(checkpoint).expanduser()
         if cp.parent.parent.name == 'checkpoints':
-            return safe_path_label(cp.parent.parent.parent.name), safe_path_label(cp.stem)
+            model_dir = cp.parent.parent.parent
+            model = model_dir.parent.name if model_dir.name == 'weights' else model_dir.name
+            return safe_path_label(model), safe_path_label(cp.stem)
     if model_source.startswith('local:'):
         model = model_source[len('local:'):]
     elif model_source.startswith('fine-tuned-weights/'):
@@ -258,7 +272,8 @@ def inference_labels(config, model_source, checkpoint=None):
     else:
         path = Path(model_source).expanduser()
         if path.is_dir():
-            model = path.parent.name if path.name == 'final' else path.name
+            model_path = path.parent if path.name == 'final' else path
+            model = model_path.parent.name if model_path.name == 'weights' else model_path.name
         else:
             model = model_source.replace('/', '--')
     if checkpoint:
@@ -273,11 +288,11 @@ def inference_labels(config, model_source, checkpoint=None):
 def setup_run(config, operation, model_source=None, checkpoint=None):
     out = Path(config['train' if operation == 'train' else 'inference']['output_dir']).expanduser()
     if operation == 'train':
-        out = out / safe_path_label(config['train']['output_model_name'])
+        out = MODEL_ROOT / validate_model_name(config['train']['output_model_name']) / 'outputs'
         prefix = 'train'
     elif operation == 'predict':
         model_label, checkpoint_label = inference_labels(config, model_source, checkpoint)
-        out = out / model_label
+        out = MODEL_ROOT / model_label / 'outputs'
         prefix = 'test-' + checkpoint_label
     else:
         prefix = operation
@@ -453,7 +468,7 @@ def save_checkpoint(path, state):
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['train']
-    model_root = WEIGHTS_ROOT / validate_model_name(settings['output_model_name'])
+    model_root = MODEL_ROOT / validate_model_name(settings['output_model_name']) / 'weights'
     model_dir = model_root / 'final'
     if (model_root.exists() and not settings.get('resume_from')) or model_dir.exists() or (model_root / 'config.json').exists():
         raise FileExistsError(f'Trained model directory already exists: {model_root}; choose a different output_model_name')

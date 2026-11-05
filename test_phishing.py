@@ -16,7 +16,10 @@ class PhishingTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='.auto-commit-test-', dir=p.ROOT)
         self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
-        self.weights_patch = patch.object(p, 'WEIGHTS_ROOT', self.root / 'weights')
+        self.model_patch = patch.object(p, 'MODEL_ROOT', self.root / 'models')
+        self.model_patch.start()
+        self.addCleanup(self.model_patch.stop)
+        self.weights_patch = patch.object(p, 'WEIGHTS_ROOT', self.root / 'legacy-weights')
         self.weights_patch.start()
         self.addCleanup(self.weights_patch.stop)
         self.c = p.read_config(p.ROOT / 'config.yaml')
@@ -98,13 +101,15 @@ class PhishingTests(unittest.TestCase):
     def test_output_folders_identify_model_and_checkpoint(self):
         self.assertEqual(p.inference_labels(self.c, 'local:Original'), ('Original', 'final'))
         self.assertEqual(p.inference_labels(self.c, 'org/model'), ('org--model', 'revision-main'))
-        checkpoint = p.WEIGHTS_ROOT / 'Original' / 'checkpoints' / 'train-123' / 'epoch-002.pt'
+        checkpoint = p.MODEL_ROOT / 'Original' / 'weights' / 'checkpoints' / 'train-123' / 'epoch-002.pt'
         self.assertEqual(p.inference_labels(self.c, 'local:Original', str(checkpoint)), ('Original', 'epoch-002'))
         out = p.setup_run(self.c, 'predict', 'local:Original', str(checkpoint))
-        self.assertEqual(out.parent.name, 'Original')
+        self.assertEqual(out.parent.name, 'outputs')
+        self.assertEqual(out.parent.parent.name, 'Original')
         self.assertTrue(out.name.startswith('test-epoch-002-'))
         train_out = p.setup_run(self.c, 'train')
-        self.assertEqual(train_out.parent.name, 'Model-1')
+        self.assertEqual(train_out.parent.name, 'outputs')
+        self.assertEqual(train_out.parent.parent.name, 'Model-1')
         self.assertTrue(train_out.name.startswith('train-'))
         self.assertEqual(p.prediction_path(self.c, out).parent, out)
 
@@ -143,7 +148,7 @@ class PhishingTests(unittest.TestCase):
         baseline = self.root / 'baseline-run'
         baseline.mkdir()
         p.train(self.c, baseline, torch.device('cpu'))
-        self.assertEqual(len(list((p.WEIGHTS_ROOT / 'baseline' / 'checkpoints' / baseline.name).glob('*.pt'))), 2)
+        self.assertEqual(len(list((p.MODEL_ROOT / 'baseline' / 'weights' / 'checkpoints' / baseline.name).glob('*.pt'))), 2)
         self.c['train']['output_model_name'] = 'resumed'
         interrupted = self.root / 'interrupted-run'
         interrupted.mkdir()
@@ -155,7 +160,7 @@ class PhishingTests(unittest.TestCase):
         with patch.object(p, 'save_checkpoint', side_effect=interrupt_after_save):
             with self.assertRaisesRegex(RuntimeError, 'simulated interruption'):
                 p.train(self.c, interrupted, torch.device('cpu'))
-        self.c['train']['resume_from'] = str(p.WEIGHTS_ROOT / 'resumed' / 'checkpoints' / interrupted.name / 'epoch-001.pt')
+        self.c['train']['resume_from'] = str(p.MODEL_ROOT / 'resumed' / 'weights' / 'checkpoints' / interrupted.name / 'epoch-001.pt')
         checkpoint_out = self.root / 'checkpoint-inference'
         checkpoint_out.mkdir()
         prediction = p.predict(self.c, checkpoint_out, torch.device('cpu'), 'local:resumed', self.c['train']['resume_from'])
@@ -169,10 +174,10 @@ class PhishingTests(unittest.TestCase):
         resumed = self.root / 'resumed-run'
         resumed.mkdir()
         p.train(self.c, resumed, torch.device('cpu'))
-        first = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'baseline' / 'final').state_dict()
-        second = AutoModelForSequenceClassification.from_pretrained(p.WEIGHTS_ROOT / 'resumed' / 'final').state_dict()
+        first = AutoModelForSequenceClassification.from_pretrained(p.MODEL_ROOT / 'baseline' / 'weights' / 'final').state_dict()
+        second = AutoModelForSequenceClassification.from_pretrained(p.MODEL_ROOT / 'resumed' / 'weights' / 'final').state_dict()
         self.assertTrue(all(torch.equal(first[k], second[k]) for k in first))
-        self.assertEqual([x.name for x in (p.WEIGHTS_ROOT / 'resumed' / 'checkpoints' / resumed.name).glob('*.pt')], ['epoch-002.pt'])
+        self.assertEqual([x.name for x in (p.MODEL_ROOT / 'resumed' / 'weights' / 'checkpoints' / resumed.name).glob('*.pt')], ['epoch-002.pt'])
         self.c['train'].update(seed=99, output_model_name='mismatch')
         with self.assertRaisesRegex(ValueError, 'Checkpoint does not match'):
             p.train(self.c, resumed, torch.device('cpu'))
@@ -206,7 +211,7 @@ class PhishingTests(unittest.TestCase):
                 self.assertTrue((run / 'validation-epoch-001' / 'predictions.csv').exists())
                 out = self.root / ('pred-' + task)
                 out.mkdir()
-                prediction = p.predict(self.c, out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task))
+                prediction = p.predict(self.c, out, torch.device('cpu'), str(p.MODEL_ROOT / task / 'weights'))
                 self.assertEqual(prediction.parent, out)
                 with prediction.open(newline='') as f:
                     rows = list(csv.DictReader(f))
@@ -215,8 +220,8 @@ class PhishingTests(unittest.TestCase):
                 self.assertEqual(json.loads((out / 'metadata.json').read_text())['task'], task)
                 checkpoint_out = self.root / ('checkpoint-pred-' + task)
                 checkpoint_out.mkdir()
-                checkpoint = p.WEIGHTS_ROOT / task / 'checkpoints' / run.name / 'epoch-001.pt'
-                p.predict(self.c, checkpoint_out, torch.device('cpu'), str(p.WEIGHTS_ROOT / task), str(checkpoint))
+                checkpoint = p.MODEL_ROOT / task / 'weights' / 'checkpoints' / run.name / 'epoch-001.pt'
+                p.predict(self.c, checkpoint_out, torch.device('cpu'), str(p.MODEL_ROOT / task / 'weights'), str(checkpoint))
                 self.assertEqual(json.loads((checkpoint_out / 'metadata.json').read_text())['checkpoint'], str(checkpoint))
 
     def test_training_and_inference_offline(self):
@@ -240,21 +245,21 @@ class PhishingTests(unittest.TestCase):
         self.assertTrue({'accuracy', 'precision', 'recall', 'f1'} <= set(validation_metrics))
         pred_dir = self.root / 'predicted'
         pred_dir.mkdir()
-        prediction = p.predict(self.c, pred_dir, torch.device('cpu'), str(p.WEIGHTS_ROOT / 'Model-1'))
+        prediction = p.predict(self.c, pred_dir, torch.device('cpu'), str(p.MODEL_ROOT / 'Model-1' / 'weights'))
         with prediction.open(newline='') as f: rows = list(csv.DictReader(f))
         self.assertEqual([r['id'] for r in rows], ['1', '2'])
         p.save_prediction_metrics(self.c, pred_dir, prediction)
         self.assertEqual(json.loads((pred_dir / 'metrics.json').read_text())['count'], 2)
         self.assertTrue(all(r['predicted_label'] in ('legitimate', 'phishing') and 0 <= float(r['phishing_probability']) <= 1 for r in rows))
-        self.assertTrue((p.WEIGHTS_ROOT / 'Model-1' / 'final' / 'config.json').exists())
-        self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.WEIGHTS_ROOT / 'Model-1' / 'final').resolve()))
+        self.assertTrue((p.MODEL_ROOT / 'Model-1' / 'weights' / 'final' / 'config.json').exists())
+        self.assertEqual(p.resolve_model_source('local:Model-1', 'main', 'cache')[0], str((p.MODEL_ROOT / 'Model-1' / 'weights' / 'final').resolve()))
         with self.assertRaises(FileExistsError):
             p.train(self.c, train_dir, torch.device('cpu'))
         # Train again from the already saved local weights, with no Hub download.
         self.c['train']['model_source'] = 'local:Model-1'
         self.c['train']['output_model_name'] = 'Model-2'
         p.train(self.c, train_dir, torch.device('cpu'))
-        self.assertTrue((p.WEIGHTS_ROOT / 'Model-2' / 'final' / 'config.json').exists())
+        self.assertTrue((p.MODEL_ROOT / 'Model-2' / 'weights' / 'final' / 'config.json').exists())
 
         # A separately selected Hub classifier can use a different positive index.
         model.config.id2label = {0: 'phishing', 1: 'legitimate'}
