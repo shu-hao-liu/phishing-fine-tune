@@ -682,7 +682,7 @@ def predict_generative(c, out, device, model_source, reference, opts, tokenizer,
             for row, response in zip(group, outputs):
                 writer.writerow({**row, 'model_response': response})
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': opts.get('revision') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'generation_settings': settings, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': opts.get('revision') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'generation_settings': settings, 'predictions_csv': str(output), 'test_csv': c['data']['inference_csv'], 'inference_csv_sha256': sha256(c['data']['inference_csv']), 'count': len(rows)})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d generated responses to %s', len(rows), output)
     return output
@@ -742,7 +742,7 @@ def predict(c, out, device, model_source, checkpoint_path=None):
                 writer.writerow({**rows[offset], 'predicted_label': labels[positive if prob >= c['inference']['threshold'] else negative], 'phishing_probability': prob})
                 offset += 1
     meta = common_metadata(c, device)
-    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': opts.get('revision') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'positive_label_index': positive, 'predictions_csv': str(output), 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
+    meta.update({'inference_model_source': model_source, 'inference_model_resolved': reference, 'inference_model_revision': opts.get('revision') if not opts.get('local_files_only') else None, 'inference_model_commit': getattr(model.config, '_commit_hash', None), 'task': task, 'checkpoint': str(checkpoint_path) if checkpoint_path else 'final', 'positive_label_index': positive, 'predictions_csv': str(output), 'test_csv': data['inference_csv'], 'inference_csv_sha256': sha256(data['inference_csv']), 'count': offset, 'threshold': c['inference']['threshold']})
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
     LOG.info('Saved %d predictions to %s', offset, output)
     return output
@@ -771,12 +771,14 @@ def main(forced_action=None):
         sub.add_parser('train', help='train and validate the model')
         prediction = sub.add_parser('test', help='test the model on data/test.csv')
         prediction.add_argument('--checkpoint', help='test an epoch checkpoint')
+        prediction.add_argument('--csv', help='test CSV path (default: project data/test.csv)')
     elif forced_action == 'train':
         parser.add_argument('--resume', help='resume training from an epoch checkpoint')
         parser.add_argument('--check', action='store_true', help='validate configuration and inspect local hardware')
     elif forced_action in ('predict', 'test'):
         forced_action = 'test'
         parser.add_argument('--checkpoint', help='test an epoch checkpoint')
+        parser.add_argument('--csv', help='test CSV path (default: project data/test.csv)')
     args = parser.parse_args()
     if forced_action is not None:
         args.action = 'check' if forced_action == 'train' and args.check else forced_action
@@ -790,7 +792,8 @@ def main(forced_action=None):
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
         if args.action == 'test':
-            c['data']['inference_csv'] = str((ROOT / 'data' / 'test.csv').resolve())
+            test_csv = Path(args.csv).expanduser() if args.csv else ROOT / 'data' / 'test.csv'
+            c['data']['inference_csv'] = str(test_csv.resolve())
             c['data']['selected_dataset'] = 'test'
             args.model_dir = c['inference'].get('model_source') or c['inference'].get('model_dir')
             if not isinstance(args.model_dir, str) or not args.model_dir.strip():

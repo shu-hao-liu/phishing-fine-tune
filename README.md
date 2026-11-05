@@ -63,7 +63,13 @@ To select a checkpoint for one run:
 python3 test.py --checkpoint /workspace/fine-tuned-weights/Original/checkpoints/train-<timestamp>/epoch-001.pt
 ```
 
-Testing always reads `data/test.csv`. The label is not included in model input; it is retained in the output for scoring. Classifiers produce predictions and metrics. Generative models produce responses and are scored only when their responses match the labels exactly.
+By default, testing reads `data/test.csv`. To test another CSV, pass its path (relative paths are relative to the current working directory):
+
+```bash
+python3 test.py --csv data/another-dataset.csv
+```
+
+You can combine `--csv` with `--checkpoint`. The CSV must contain the configured text column (`body` by default). Include the configured label column (`label` by default) with labels matching the model and positive label to calculate metrics. The label is not included in model input; it is retained in the output for scoring. Classifiers produce predictions and metrics. Generative models produce responses and are scored only when their responses match the labels exactly.
 
 ## Files produced
 
