@@ -101,8 +101,11 @@ class PhishingTests(unittest.TestCase):
         checkpoint = p.WEIGHTS_ROOT / 'Original' / 'checkpoints' / 'train-123' / 'epoch-002.pt'
         self.assertEqual(p.inference_labels(self.c, 'local:Original', str(checkpoint)), ('Original', 'epoch-002'))
         out = p.setup_run(self.c, 'predict', 'local:Original', str(checkpoint))
-        self.assertEqual(out.parent.name, 'epoch-002')
-        self.assertEqual(out.parent.parent.name, 'Original')
+        self.assertEqual(out.parent.name, 'Original')
+        self.assertTrue(out.name.startswith('test-epoch-002-'))
+        train_out = p.setup_run(self.c, 'train')
+        self.assertEqual(train_out.parent.name, 'Model-1')
+        self.assertTrue(train_out.name.startswith('train-'))
         self.assertEqual(p.prediction_path(self.c, out).parent, out)
 
     def test_url_parsing(self):

@@ -273,12 +273,16 @@ def inference_labels(config, model_source, checkpoint=None):
 def setup_run(config, operation, model_source=None, checkpoint=None):
     out = Path(config['train' if operation == 'train' else 'inference']['output_dir']).expanduser()
     if operation == 'train':
-        out = out / safe_path_label(config['train']['output_model_name']) / 'training'
+        out = out / safe_path_label(config['train']['output_model_name'])
+        prefix = 'train'
     elif operation == 'predict':
         model_label, checkpoint_label = inference_labels(config, model_source, checkpoint)
-        out = out / model_label / checkpoint_label
+        out = out / model_label
+        prefix = 'test-' + checkpoint_label
+    else:
+        prefix = operation
     out.mkdir(parents=True, exist_ok=True)
-    run = out / (operation + '-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
+    run = out / (prefix + '-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
     run.mkdir()
     LOG.setLevel(logging.INFO)
     for handler in LOG.handlers[:]:

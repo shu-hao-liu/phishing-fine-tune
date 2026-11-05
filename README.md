@@ -13,7 +13,7 @@ phishing-detect/
     └── test.csv
 ```
 
-The scripts always use these paths. The CSVs are excluded from Git and need to be uploaded separately. Label `1.0` means phishing.
+These are the default dataset paths. The CSVs are excluded from Git and need to be uploaded separately. Label `1.0` means phishing.
 
 Install dependencies once:
 
@@ -75,8 +75,10 @@ You can combine `--csv` with `--checkpoint`. The CSV must contain the configured
 
 - Model and tokenizer: `/workspace/fine-tuned-weights/<model>/final/`.
 - Resumable epoch checkpoints: `/workspace/fine-tuned-weights/<model>/checkpoints/train-<timestamp>/epoch-NNN.pt`.
-- Training logs, settings and validation results: `/workspace/phishing-detect-output/<model>/training/train-<timestamp>/`.
-- Test predictions, metrics when available, logs and settings: `/workspace/phishing-detect-output/<model>/<checkpoint-or-final>/predict-<timestamp>/`.
+- Training logs, settings and validation results: `/workspace/phishing-detect-output/<model>/train-<timestamp>/`.
+- Test predictions, metrics when available, logs and settings: `/workspace/phishing-detect-output/<model>/test-<checkpoint-or-final>-<timestamp>/`.
+
+Each training or test run gets its own folder directly under the model name. The test folder name identifies the checkpoint or final model used. Existing output folders are not moved.
 
 The Hugging Face download cache is on the Pod's local disk. Each output run has its own folder. `train.task` and `test.task` support `auto`, `classification`, `causal_lm` and `seq2seq`; model architecture, available memory and Transformers support still determine which models can run.
 
