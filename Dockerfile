@@ -4,6 +4,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 WORKDIR /opt/phishing-detect
 COPY requirements.txt ./
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
-COPY finetune.py test.py analyze_results.py config.yaml ./
+COPY finetune.py test.py analyze_results.py format_csv.py config.yaml ./
 # Keep the Pod alive for interactive commands; no network services are exposed.
 CMD ["sleep", "infinity"]

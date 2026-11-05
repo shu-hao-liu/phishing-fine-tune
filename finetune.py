@@ -192,6 +192,7 @@ def read_config(path, train_csv_override=None):
 
 
 def read_csv(path, text_column, label_column=None):
+    csv.field_size_limit(sys.maxsize)
     with open(path, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames or len(reader.fieldnames) != len(set(reader.fieldnames)):

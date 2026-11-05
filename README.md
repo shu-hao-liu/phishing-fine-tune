@@ -91,3 +91,16 @@ python3 finetune.py
 ```
 
 If you need torchvision for another project, use a separate environment or install a torchvision build compatible with your installed PyTorch and CUDA instead.
+
+## Format another CSV
+
+Use `format_csv.py` to prepare one CSV at a time. It creates a new file and will not overwrite an existing file or split the data. For example:
+
+```bash
+python3 format_csv.py data/raw.csv data/formatted.csv --mode train \
+  --text-column message --label-column category --positive phishing --negative legitimate
+```
+
+`--mode` is `train`, `validate`, or `test`. The example maps the source columns and labels to the configured text and label columns, with `1.0` for phishing and `0.0` for legitimate by default. Omit the column and label mapping options when the source already uses the configured column names and labels. To format a test dataset with no label column, use `--mode test --unlabeled`; it produces predictions without metrics.
+
+The output retains the subject, text, URLs, label, language and source columns when available; missing optional columns are empty and other columns are omitted. All rows are preserved in order. The formatter reports invalid or missing text and labels instead of silently dropping records. Training requires both classes. Upload or move the formatted file to the appropriate dataset name if you want to use it for training or validation. For testing, pass its path with `python3 test.py --csv data/formatted.csv`.

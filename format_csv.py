@@ -34,6 +34,8 @@ def format_csv(source, output, *, mode, text_source, label_source, text_target,
     if positive_source is not None:
         labels = {positive_source: positive_label, negative_source: negative_label}
     columns = list(dict.fromkeys(['subject', text_target, 'urls'] + ([] if unlabeled else [label_target]) + ['language', 'source']))
+    if unlabeled and label_target in columns:
+        columns.remove(label_target)
     csv.field_size_limit(sys.maxsize)
     temp = None
     counts = Counter()
@@ -56,7 +58,7 @@ def format_csv(source, output, *, mode, text_source, label_source, text_target,
                     text = row[text_source]
                     if not text.strip():
                         raise ValueError(f'Empty text at line {reader.line_num}')
-                    formatted = {name: row.get(name, '') for name in OPTIONAL_COLUMNS}
+                    formatted = {name: row.get(name, '') for name in OPTIONAL_COLUMNS if name in columns}
                     formatted[text_target] = text
                     if not unlabeled:
                         value = row[label_source].strip()
