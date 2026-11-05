@@ -30,12 +30,10 @@ def format_csv(source, output, *, mode, text_source, label_source, text_target,
         raise ValueError('Positive and negative labels must differ')
     if text_target == label_target or (not unlabeled and text_source == label_source):
         raise ValueError('Text and label columns must be different')
-    if text_target in OPTIONAL_COLUMNS or label_target in OPTIONAL_COLUMNS:
-        raise ValueError('Configured text and label columns must not conflict with optional output columns')
     labels = {positive_label: positive_label, negative_label: negative_label}
     if positive_source is not None:
         labels = {positive_source: positive_label, negative_source: negative_label}
-    columns = ['subject', text_target, 'urls'] + ([] if unlabeled else [label_target]) + ['language', 'source']
+    columns = list(dict.fromkeys(['subject', text_target, 'urls'] + ([] if unlabeled else [label_target]) + ['language', 'source']))
     csv.field_size_limit(sys.maxsize)
     temp = None
     counts = Counter()
