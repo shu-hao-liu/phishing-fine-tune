@@ -47,6 +47,16 @@ The `test` section chooses the model and test settings independently. By default
 python3 test.py
 ```
 
+To run `python3 test.py` directly from `/workspace` when the project is in a subfolder, create a link once from inside the project folder:
+
+```bash
+ln -s "$(pwd)/test.py" /workspace/test.py
+cd /workspace
+python3 test.py
+```
+
+The link uses the project folder's `config.yaml` and `data/test.csv`. If the project files are already directly in `/workspace`, no link is needed. If `/workspace/test.py` already exists, inspect it before replacing it.
+
 To select a checkpoint for one run:
 
 ```bash
