@@ -34,7 +34,7 @@ Training reads `data/train.csv` and automatically validates the trained model wi
 To resume an interrupted run from a saved epoch, use the original settings and pass the checkpoint:
 
 ```bash
-python3 finetune.py --resume /workspace/fine-tuned-weights/Original/checkpoints/train-<timestamp>/epoch-001.pt
+python3 finetune.py --resume /workspace/Original/weights/checkpoints/train-<timestamp>/epoch-001.pt
 ```
 
 You can instead set `train.resume_from` in the config. The training data, model, tokenizer, device type, precision and training settings must match the checkpoint. Load checkpoints only from trusted sources.
@@ -60,7 +60,7 @@ The link uses the project folder's `config.yaml` and `data/test.csv`. If the pro
 To select a checkpoint for one run:
 
 ```bash
-python3 test.py --checkpoint /workspace/fine-tuned-weights/Original/checkpoints/train-<timestamp>/epoch-001.pt
+python3 test.py --checkpoint /workspace/Original/weights/checkpoints/train-<timestamp>/epoch-001.pt
 ```
 
 By default, testing reads `data/test.csv`. To test another CSV, pass its path (relative paths are relative to the current working directory):
@@ -73,12 +73,12 @@ You can combine `--csv` with `--checkpoint`. The CSV must contain the configured
 
 ## Files produced
 
-- Model and tokenizer: `/workspace/fine-tuned-weights/<model>/final/`.
-- Resumable epoch checkpoints: `/workspace/fine-tuned-weights/<model>/checkpoints/train-<timestamp>/epoch-NNN.pt`.
-- Training logs, settings and validation results: `/workspace/phishing-detect-output/<model>/train-<timestamp>/`.
-- Test predictions, metrics when available, logs and settings: `/workspace/phishing-detect-output/<model>/test-<checkpoint-or-final>-<timestamp>/`.
+- Model and tokenizer: `/workspace/<model>/weights/final/`.
+- Resumable epoch checkpoints: `/workspace/<model>/weights/checkpoints/train-<timestamp>/epoch-NNN.pt`.
+- Training logs, settings and validation results: `/workspace/<model>/outputs/train-<timestamp>/`.
+- Test predictions, metrics when available, logs and settings: `/workspace/<model>/outputs/test-<checkpoint-or-final>-<timestamp>/`.
 
-Each training or test run gets its own folder directly under the model name. The test folder name identifies the checkpoint or final model used. Existing output folders are not moved.
+Each model has one folder containing weights and outputs. Each training or test run has its own output folder; test folder names identify the checkpoint or final model. Existing files are not moved. Models in the previous `/workspace/fine-tuned-weights/<model>/` layout remain readable with `local:<model>`, and old checkpoint paths remain usable.
 
 The Hugging Face download cache is on the Pod's local disk. Each output run has its own folder. `train.task` and `test.task` support `auto`, `classification`, `causal_lm` and `seq2seq`; model architecture, available memory and Transformers support still determine which models can run.
 

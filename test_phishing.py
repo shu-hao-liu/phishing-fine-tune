@@ -113,6 +113,18 @@ class PhishingTests(unittest.TestCase):
         self.assertTrue(train_out.name.startswith('train-'))
         self.assertEqual(p.prediction_path(self.c, out).parent, out)
 
+    def test_legacy_and_new_model_weights_resolution(self):
+        old_final = p.WEIGHTS_ROOT / 'Legacy' / 'final'
+        old_final.mkdir(parents=True)
+        self.assertEqual(p.resolve_model_source('local:Legacy', 'main', 'cache')[0], str(old_final.resolve()))
+        new_final = p.MODEL_ROOT / 'Legacy' / 'weights' / 'final'
+        new_final.mkdir(parents=True)
+        self.assertEqual(p.resolve_model_source('local:Legacy', 'main', 'cache')[0], str(new_final.resolve()))
+        old_cp = p.WEIGHTS_ROOT / 'Legacy' / 'checkpoints' / 'train-123' / 'epoch-001.pt'
+        new_cp = p.MODEL_ROOT / 'Legacy' / 'weights' / 'checkpoints' / 'train-123' / 'epoch-001.pt'
+        for cp in (old_cp, new_cp):
+            self.assertEqual(p.inference_labels(self.c, 'local:Other', str(cp)), ('Legacy', 'epoch-001'))
+
     def test_url_parsing(self):
         self.assertEqual(p.repository_id('https://huggingface.co/example/model/'), 'example/model')
         with self.assertRaises(ValueError): p.repository_id('https://example.com/model')
