@@ -1,3 +1,4 @@
+# torchvision is not required; pip does not remove an existing installation.
 torch==2.8.0
 transformers==4.57.0
 PyYAML==6.0.3
