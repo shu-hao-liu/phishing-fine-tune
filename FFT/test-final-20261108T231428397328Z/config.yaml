@@ -1,0 +1,62 @@
+train:
+  dataset: original
+  model_source: local:Original
+  model_revision: main
+  task: auto
+  trust_remote_code: false
+  output_model_name: FFT
+  resume_from: null
+  epochs: 3
+  learning_rate: 2.0e-05
+  batch_size: 32
+  gradient_accumulation_steps: 1
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  seed: 42
+  precision: auto
+  lora:
+    enabled: false
+    rank: 8
+    alpha: 16
+    dropout: 0.05
+    target_modules:
+    - query
+    - value
+  progress_every: 50
+  text_column: body
+  label_column: label
+  positive_label: '1.0'
+  max_length: 512
+  cache_dir: /tmp/phishing-detect-hf-cache
+  output_dir: /workspace/phishing-detect-output
+data:
+  train_csv: /workspace/data/train.csv
+  eval_csv: /workspace/data/validation.csv
+  inference_csv: /workspace/data/test.csv
+  dataset: original
+  text_column: body
+  label_column: label
+  positive_label: '1.0'
+  max_length: 512
+  prompt_template: 'Classify the following text as phishing or legitimate.
+
+    Text: {text}
+
+    Label:'
+  selected_dataset: test
+inference:
+  model_source: local:FFT
+  model_revision: main
+  task: auto
+  trust_remote_code: false
+  positive_label_index: null
+  checkpoint: null
+  batch_size: 32
+  threshold: 0.5
+  max_new_tokens: 32
+  do_sample: false
+  temperature: 0.1
+  top_p: 0.9
+  cache_dir: /tmp/phishing-detect-hf-cache
+  output_dir: /workspace/phishing-detect-output
+validation_threshold: 0.5

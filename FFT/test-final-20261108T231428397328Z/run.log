@@ -1,0 +1,5 @@
+2026-11-08 23:14:28,400 INFO Outputs: /workspace/FFT/outputs/test-final-20261108T231428397328Z
+2026-11-08 23:14:28,423 INFO Device: cuda (NVIDIA GeForce RTX 4090); precision: bf16
+2026-11-08 23:14:28,424 INFO Testing data: /workspace/data/test.csv
+2026-11-08 23:15:02,488 INFO Saved 10869 predictions to /workspace/FFT/outputs/test-final-20261108T231428397328Z/predictions.csv
+2026-11-08 23:15:02,931 INFO Saved metrics: {"count": 10869, "accuracy": 0.9668782776704389, "precision": 0.987556357078449, "recall": 0.9495404889890757, "f1": 0.9681753889674681, "true_positives": 5476, "false_positives": 69, "true_negatives": 5033, "false_negatives": 291, "positive_label": "1.0", "negative_label": "0.0", "label_column": "label", "prediction_column": "predicted_label"}
