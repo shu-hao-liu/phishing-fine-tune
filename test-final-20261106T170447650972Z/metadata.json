@@ -1,0 +1,23 @@
+{
+  "training_base_model_source": "FacebookAI/xlm-roberta-base",
+  "training_base_requested_revision": "main",
+  "torch": "2.8.0+cu128",
+  "transformers": "4.57.0",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "seed": 42,
+  "effective_precision": "bf16",
+  "inference_model_source": "local:Original",
+  "inference_model_resolved": "/workspace/fine-tuned-weights/Original/final",
+  "inference_model_revision": null,
+  "inference_model_commit": null,
+  "task": "classification",
+  "checkpoint": "final",
+  "positive_label_index": 1,
+  "predictions_csv": "/workspace/Original/outputs/test-final-20261106T170447650972Z/predictions.csv",
+  "test_csv": "/workspace/data/FCN_Phishing_Email_dataset_formatted.csv",
+  "inference_csv_sha256": "b7c3031786a60311bbef1ec048b710b025f83e89f470f39247dd4ef618eb982d",
+  "count": 3030,
+  "threshold": 0.5
+}
