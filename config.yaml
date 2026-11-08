@@ -1,6 +1,6 @@
 train:
   dataset: fcn  # original or fcn
-  model_source: FacebookAI/xlm-roberta-base
+  model_source: local:Original
   model_revision: main
   task: auto
   trust_remote_code: false
