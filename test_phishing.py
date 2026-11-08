@@ -194,6 +194,49 @@ class PhishingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Checkpoint does not match'):
             p.train(self.c, resumed, torch.device('cpu'))
 
+    def test_lora_checkpoint_resume_and_final_predictions(self):
+        vocab = self.root / 'vocab.txt'
+        vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\n')
+        tokenizer = DistilBertTokenizerFast(vocab_file=str(vocab))
+        base = self.root / 'lora-base'
+        base.mkdir()
+        tokenizer.save_pretrained(base)
+        cfg = DistilBertConfig(vocab_size=len(tokenizer), dim=16, hidden_dim=32, n_layers=1, n_heads=2, max_position_embeddings=32, num_labels=2)
+        torch.manual_seed(123)
+        AutoModelForSequenceClassification.from_config(cfg).save_pretrained(base)
+        self.c['train'].update(model_source=str(base), task='classification', epochs=2, output_model_name='lora')
+        self.c['train']['lora'] = {'enabled': True, 'rank': 2, 'alpha': 4, 'dropout': 0.0, 'target_modules': None}
+        run = self.root / 'lora-run'
+        run.mkdir()
+        p.train(self.c, run, torch.device('cpu'))
+        checkpoint = p.MODEL_ROOT / 'lora' / 'weights' / 'checkpoints' / run.name / 'epoch-002.pt'
+        restored, tok, _, _, _ = p.load_epoch_model(str(checkpoint), self.c)
+        final = AutoModelForSequenceClassification.from_pretrained(p.MODEL_ROOT / 'lora' / 'weights' / 'final')
+        restored.eval(); final.eval()
+        inputs = tok('click now', return_tensors='pt')
+        with torch.no_grad():
+            self.assertTrue(torch.allclose(restored(**inputs).logits, final(**inputs).logits, atol=1e-6))
+        saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
+        self.assertTrue(any('lora_' in k for k in saved['model']))
+        self.assertLess(len(saved['model']), len(restored.state_dict()))
+        self.c['train']['output_model_name'] = 'lora-resume'
+        interrupted = self.root / 'lora-interrupted'
+        interrupted.mkdir()
+        save = p.save_checkpoint
+        def interrupt(path, state):
+            save(path, state)
+            if state['epoch'] == 1:
+                raise RuntimeError('stop')
+        with patch.object(p, 'save_checkpoint', side_effect=interrupt):
+            with self.assertRaisesRegex(RuntimeError, 'stop'):
+                p.train(self.c, interrupted, torch.device('cpu'))
+        self.c['train']['resume_from'] = str(p.MODEL_ROOT / 'lora-resume' / 'weights' / 'checkpoints' / interrupted.name / 'epoch-001.pt')
+        resumed = self.root / 'lora-resumed'
+        resumed.mkdir()
+        p.train(self.c, resumed, torch.device('cpu'))
+        resumed_model = AutoModelForSequenceClassification.from_pretrained(p.MODEL_ROOT / 'lora-resume' / 'weights' / 'final')
+        self.assertTrue(all(torch.equal(v, resumed_model.state_dict()[k]) for k, v in final.state_dict().items()))
+
     def test_generative_models_train_and_predict(self):
         vocab = self.root / 'vocab.txt'
         vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\nphishing\nlegitimate\n')
