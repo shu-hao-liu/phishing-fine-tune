@@ -194,6 +194,16 @@ class PhishingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Checkpoint does not match'):
             p.train(self.c, resumed, torch.device('cpu'))
 
+    def test_lora_targets_xlm_roberta_and_trains_head(self):
+        from transformers import XLMRobertaConfig
+        config = XLMRobertaConfig(vocab_size=20, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2, num_labels=2)
+        model = AutoModelForSequenceClassification.from_config(config)
+        model = p.apply_lora(model, 'classification', {'rank': 2, 'alpha': 4, 'dropout': 0.0, 'target_modules': ['query', 'value']})
+        trainable = [name for name, param in model.named_parameters() if param.requires_grad]
+        self.assertTrue(any('lora_' in name for name in trainable))
+        self.assertTrue(any('classifier' in name for name in trainable))
+        self.assertFalse(any('embeddings' in name for name in trainable))
+
     def test_lora_checkpoint_resume_and_final_predictions(self):
         vocab = self.root / 'vocab.txt'
         vocab.write_text('[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nclick\nnow\nhello\nfriend\nverify\n')

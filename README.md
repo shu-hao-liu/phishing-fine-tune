@@ -39,6 +39,12 @@ python3 finetune.py --resume /workspace/Original/weights/checkpoints/train-<time
 
 You can instead set `train.resume_from` in the config. The training data, model, tokenizer, device type, precision and training settings must match the checkpoint. Load checkpoints only from trusted sources.
 
+## LoRA fine-tuning
+
+To train LoRA adapters instead of updating the full base model, set `train.lora.enabled: true` in `config.yaml`. The other LoRA settings control rank, alpha, dropout, and target module names. The default `[query, value]` targets XLM-RoBERTa; other architectures may need different names, or `target_modules: null` where PEFT supports automatic selection. For classifiers, the classification head is also trained.
+
+Epoch checkpoints contain adapter and optimizer state for resuming. The final folder contains a full model with the adapter merged into the base weights, so `test.py` can use it normally. Testing or resuming an epoch checkpoint also requires the original base model and tokenizer in the local cache or available from Hugging Face. Install the updated requirements before using LoRA.
+
 ## Test
 
 The `test` section chooses the model and test settings independently. By default, `local:Original` uses the final trained model. You can also select a Hugging Face model, or set `test.checkpoint` to an epoch checkpoint. A checkpoint takes precedence over the model setting. The base model and tokenizer must be available in the local cache or on Hugging Face when loading a checkpoint.

@@ -486,7 +486,10 @@ def checkpoint_model_state(model, lora_enabled):
 
 def restore_model_state(model, state, lora_enabled):
     if lora_enabled:
-        from peft import set_peft_model_state_dict
+        from peft import get_peft_model_state_dict, set_peft_model_state_dict
+        expected = set(get_peft_model_state_dict(model))
+        if set(state) != expected:
+            raise ValueError('LoRA checkpoint adapter keys do not match the model')
         result = set_peft_model_state_dict(model, state)
         if result.unexpected_keys:
             raise ValueError(f'Unexpected LoRA checkpoint keys: {result.unexpected_keys}')
