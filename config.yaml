@@ -18,7 +18,7 @@ train:
     rank: 8
     alpha: 16
     dropout: 0.05
-    target_modules: null  # null uses PEFT defaults for supported models
+    target_modules: [query, value]  # XLM-RoBERTa attention layers
   progress_every: 50
   text_column: body
   label_column: label

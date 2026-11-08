@@ -205,7 +205,7 @@ class PhishingTests(unittest.TestCase):
         torch.manual_seed(123)
         AutoModelForSequenceClassification.from_config(cfg).save_pretrained(base)
         self.c['train'].update(model_source=str(base), task='classification', epochs=2, output_model_name='lora')
-        self.c['train']['lora'] = {'enabled': True, 'rank': 2, 'alpha': 4, 'dropout': 0.0, 'target_modules': None}
+        self.c['train']['lora'] = {'enabled': True, 'rank': 2, 'alpha': 4, 'dropout': 0.0, 'target_modules': ['q_lin', 'v_lin']}
         run = self.root / 'lora-run'
         run.mkdir()
         p.train(self.c, run, torch.device('cpu'))
