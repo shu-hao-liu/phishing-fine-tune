@@ -30,7 +30,7 @@ validate:
   threshold: 0.5
 
 test:
-  model_source: local:Original
+  model_source: local:FFT
   model_revision: main
   task: auto
   trust_remote_code: false
