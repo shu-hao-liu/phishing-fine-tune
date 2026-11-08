@@ -13,6 +13,12 @@ train:
   max_grad_norm: 1.0
   seed: 42
   precision: auto
+  lora:
+    enabled: false
+    rank: 8
+    alpha: 16
+    dropout: 0.05
+    target_modules: null  # null uses PEFT defaults for supported models
   progress_every: 50
   text_column: body
   label_column: label

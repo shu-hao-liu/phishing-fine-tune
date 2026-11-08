@@ -2,3 +2,4 @@
 torch==2.8.0
 transformers==4.57.0
 PyYAML==6.0.3
+peft==0.20.0

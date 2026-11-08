@@ -161,6 +161,19 @@ def read_config(path, train_csv_override=None):
         v = c['train'].get(key)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or (key != 'weight_decay' and v == 0):
             raise ValueError(f'train.{key} must be a finite valid number')
+    lora = c['train'].get('lora', {})
+    if not isinstance(lora, dict) or not isinstance(lora.get('enabled', False), bool):
+        raise ValueError('train.lora must be a mapping with a boolean enabled field')
+    for key, default in (('rank', 8), ('alpha', 16)):
+        value = lora.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f'train.lora.{key} must be a positive integer')
+    dropout = lora.get('dropout', 0.05)
+    if isinstance(dropout, bool) or not isinstance(dropout, (int, float)) or not math.isfinite(dropout) or not 0 <= dropout < 1:
+        raise ValueError('train.lora.dropout must be in [0, 1)')
+    targets = lora.get('target_modules')
+    if targets is not None and (not isinstance(targets, list) or not targets or any(not isinstance(v, str) or not v.strip() for v in targets)):
+        raise ValueError('train.lora.target_modules must be null or a nonempty list of module names')
     validate_model_name(c['train'].get('output_model_name'))
     seed = c['train'].get('seed')
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
@@ -442,11 +455,43 @@ def checkpoint_identity(c, model, tokenizer, task, device, labels, data_hash):
                      'batch_size', 'gradient_accumulation_steps', 'weight_decay', 'max_grad_norm', 'seed')
     data_keys = ('text_column', 'label_column', 'positive_label', 'max_length', 'prompt_template')
     config_hash, tokenizer_hash = model_tokenizer_fingerprints(model, tokenizer)
-    return {'training': {k: settings.get(k) for k in training_keys},
+    training = {k: settings.get(k) for k in training_keys}
+    if settings.get('lora', {}).get('enabled', False):
+        training['lora'] = settings['lora']
+    return {'training': training,
             'data': {k: data.get(k) for k in data_keys}, 'train_csv_sha256': data_hash,
             'task': task, 'labels': labels, 'device_type': device.type,
             'precision': effective_precision(c, device), 'model_config_sha256': config_hash,
             'tokenizer_sha256': tokenizer_hash, 'model_commit': getattr(model.config, '_commit_hash', None)}
+
+
+def apply_lora(model, task, settings):
+    from peft import LoraConfig, get_peft_model
+    task_type = {'classification': 'SEQ_CLS', 'causal_lm': 'CAUSAL_LM', 'seq2seq': 'SEQ_2_SEQ_LM'}[task]
+    config = LoraConfig(task_type=task_type, r=settings.get('rank', 8),
+                        lora_alpha=settings.get('alpha', 16), lora_dropout=settings.get('dropout', 0.05),
+                        target_modules=settings.get('target_modules'), bias='none')
+    try:
+        return get_peft_model(model, config)
+    except ValueError as exc:
+        raise ValueError(f'Cannot apply LoRA to this model; set train.lora.target_modules for its architecture: {exc}') from exc
+
+
+def checkpoint_model_state(model, lora_enabled):
+    if lora_enabled:
+        from peft import get_peft_model_state_dict
+        return get_peft_model_state_dict(model)
+    return model.state_dict()
+
+
+def restore_model_state(model, state, lora_enabled):
+    if lora_enabled:
+        from peft import set_peft_model_state_dict
+        result = set_peft_model_state_dict(model, state)
+        if result.unexpected_keys:
+            raise ValueError(f'Unexpected LoRA checkpoint keys: {result.unexpected_keys}')
+    else:
+        model.load_state_dict(state)
 
 
 def save_checkpoint(path, state):
@@ -509,9 +554,14 @@ def train(c, out, device):
         model = cls.from_pretrained(repo, **opts)
     model.config.phishing_task = task
     model.config.pad_token_id = tokenizer.pad_token_id
+    identity = checkpoint_identity(c, model, tokenizer, task, device, labels, train_hash)
+    lora_enabled = settings.get('lora', {}).get('enabled', False)
+    if lora_enabled:
+        model = apply_lora(model, task, settings['lora'])
+        LOG.info('LoRA enabled: %d trainable of %d parameters', sum(p.numel() for p in model.parameters() if p.requires_grad), sum(p.numel() for p in model.parameters()))
     model.to(device)
     loader = make_loader(rows, tokenizer, c, labels, shuffle=True) if task == 'classification' else make_generative_loader(rows, tokenizer, c, task, model, shuffle=True)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=settings['learning_rate'], weight_decay=settings['weight_decay'])
+    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=settings['learning_rate'], weight_decay=settings['weight_decay'])
     accum = settings['gradient_accumulation_steps']
     steps = math.ceil(len(loader) / accum) * settings['epochs']
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=steps)
@@ -519,7 +569,6 @@ def train(c, out, device):
     LOG.info('Training precision: %s', precision)
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda' and precision == 'fp16'))
     optimizer.zero_grad(set_to_none=True)
-    identity = checkpoint_identity(c, model, tokenizer, task, device, labels, train_hash)
     start_epoch = 0
     if settings.get('resume_from'):
         checkpoint = torch.load(settings['resume_from'], map_location='cpu', weights_only=False)
@@ -528,7 +577,7 @@ def train(c, out, device):
         start_epoch = checkpoint['epoch']
         if not isinstance(start_epoch, int) or not 0 < start_epoch <= settings['epochs']:
             raise ValueError('Checkpoint epoch is invalid for this training configuration')
-        model.load_state_dict(checkpoint['model'])
+        restore_model_state(model, checkpoint['model'], lora_enabled)
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
         scaler.load_state_dict(checkpoint['scaler'])
@@ -563,7 +612,7 @@ def train(c, out, device):
         LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
         checkpoint_path = model_root / 'checkpoints' / out.name / f'epoch-{epoch + 1:03d}.pt'
         save_checkpoint(checkpoint_path, {'format_version': 1, 'epoch': epoch + 1, 'identity': identity,
-                        'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
+                        'model': checkpoint_model_state(model, lora_enabled), 'optimizer': optimizer.state_dict(),
                         'scheduler': scheduler.state_dict(), 'scaler': scaler.state_dict(),
                         'python_rng': random.getstate(), 'torch_rng': torch.get_rng_state(),
                         'cuda_rng': torch.cuda.get_rng_state_all() if device.type == 'cuda' else None})
@@ -597,6 +646,8 @@ def train(c, out, device):
     model_root.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(exist_ok=False)
     try:
+        if lora_enabled:
+            model = model.merge_and_unload()
         model.save_pretrained(model_dir)
         tokenizer.save_pretrained(model_dir)
     except Exception:
@@ -650,7 +701,10 @@ def load_epoch_model(checkpoint_path, c):
     config_hash, tokenizer_hash = model_tokenizer_fingerprints(model, tokenizer)
     if config_hash != identity['model_config_sha256'] or tokenizer_hash != identity['tokenizer_sha256']:
         raise ValueError('Checkpoint base model or tokenizer has changed; use the original revision')
-    model.load_state_dict(checkpoint['model'])
+    lora = training.get('lora', {})
+    if lora.get('enabled', False):
+        model = apply_lora(model, task, lora)
+    restore_model_state(model, checkpoint['model'], lora.get('enabled', False))
     return model, tokenizer, task, reference, opts
 
 
