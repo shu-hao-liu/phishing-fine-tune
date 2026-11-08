@@ -1,0 +1,21 @@
+{
+  "training_base_model_source": "local:Original",
+  "training_base_requested_revision": "main",
+  "torch": "2.8.0+cu128",
+  "transformers": "4.57.0",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "seed": 42,
+  "effective_precision": "bf16",
+  "resolved_model_revision": null,
+  "resolved_tokenizer_revision": null,
+  "task": "classification",
+  "labels": {
+    "0.0": 0,
+    "1.0": 1
+  },
+  "trained_model_dir": "/workspace/FFT/weights/final",
+  "training_csv_sha256": "6b03f385c573746b1b969e4656e819eb87dfa99414d08018fdcaf4342267ee1b",
+  "eval_csv_sha256": "f331feaf2987226f733425bd3369f4fbeef3eccfdcdaaa66a78990822a3fdf5f"
+}
