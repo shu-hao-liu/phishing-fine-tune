@@ -1,0 +1,10 @@
+2026-11-04 19:50:56,654 INFO Outputs: /workspace/phishing-detect-output/Original/training/train-20261104T195056653240Z
+2026-11-04 19:50:56,655 INFO Device: cuda (NVIDIA RTX PRO 6000 Blackwell Server Edition); precision: bf16
+2026-11-04 19:50:56,656 ERROR Run failed
+Traceback (most recent call last):
+  File "/workspace/finetune.py", line 786, in main
+    if args.action == 'train': train(c, out, device)
+                               ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/finetune.py", line 432, in train
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
+ModuleNotFoundError: No module named 'transformers'

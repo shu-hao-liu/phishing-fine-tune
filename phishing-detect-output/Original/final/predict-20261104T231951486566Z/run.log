@@ -1,0 +1,4 @@
+2026-11-04 23:19:51,491 INFO Outputs: /workspace/phishing-detect-output/Original/final/predict-20261104T231951486566Z
+2026-11-04 23:19:51,518 INFO Device: cuda (NVIDIA GeForce RTX 4090); precision: bf16
+2026-11-04 23:20:55,285 INFO Saved 10869 predictions to /workspace/phishing-detect-output/Original/final/predict-20261104T231951486566Z/predictions.csv
+2026-11-04 23:20:55,811 INFO Saved metrics: {"count": 10869, "accuracy": 0.9689023829239121, "precision": 0.9909567733767408, "recall": 0.9500606901335183, "f1": 0.9700779036827195, "true_positives": 5479, "false_positives": 50, "true_negatives": 5052, "false_negatives": 288, "positive_label": "1.0", "negative_label": "0.0", "label_column": "label", "prediction_column": "predicted_label"}
