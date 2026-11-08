@@ -1,10 +1,10 @@
 train:
-  dataset: original  # original or fcn
+  dataset: fcn  # original or fcn
   model_source: FacebookAI/xlm-roberta-base
   model_revision: main
   task: auto
   trust_remote_code: false
-  output_model_name: Original
+  output_model_name: FFT
   resume_from: null
   epochs: 3
   learning_rate: 2.0e-05
