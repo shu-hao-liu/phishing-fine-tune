@@ -100,10 +100,15 @@ def read_config(path, train_csv_override=None):
         train, validate, test = c['train'], c['validate'], c['test']
         if not all(isinstance(section, dict) for section in (train, validate, test)):
             raise ValueError('train, validate, and test must be configuration sections')
+        dataset = train.get('dataset', 'original')
+        if dataset not in ('original', 'fcn'):
+            raise ValueError('train.dataset must be original or fcn')
+        prefix = 'FCN_' if dataset == 'fcn' else ''
         c = {'train': dict(train), 'data': {
-            'train_csv': str(ROOT / 'data/train.csv'),
-            'eval_csv': str(ROOT / 'data/validation.csv'),
-            'inference_csv': str(ROOT / 'data/test.csv'),
+            'train_csv': str(ROOT / 'data' / f'{prefix}train.csv'),
+            'eval_csv': str(ROOT / 'data' / f'{prefix}validation.csv'),
+            'inference_csv': str(ROOT / 'data' / f'{prefix}test.csv'),
+            'dataset': dataset,
             'text_column': train.get('text_column', 'body'),
             'label_column': train.get('label_column', 'label'),
             'positive_label': train.get('positive_label', '1.0'),
@@ -869,7 +874,11 @@ def main(forced_action=None):
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
         if args.action == 'test':
-            test_csv = Path(args.csv).expanduser() if args.csv else ROOT / 'data' / 'test.csv'
+            dataset = c['train'].get('dataset', 'original')
+            if dataset not in ('original', 'fcn'):
+                raise ValueError('train.dataset must be original or fcn')
+            test_name = 'FCN_test.csv' if dataset == 'fcn' else 'test.csv'
+            test_csv = Path(args.csv).expanduser() if args.csv else ROOT / 'data' / test_name
             c['data']['inference_csv'] = str(test_csv.resolve())
             c['data']['selected_dataset'] = 'test'
             args.model_dir = c['inference'].get('model_source') or c['inference'].get('model_dir')

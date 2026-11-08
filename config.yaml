@@ -1,4 +1,5 @@
 train:
+  dataset: original  # original or fcn
   model_source: FacebookAI/xlm-roberta-base
   model_revision: main
   task: auto
