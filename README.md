@@ -21,6 +21,17 @@ Install dependencies once:
 python3 -m pip install -r requirements.txt
 ```
 
+## Choose a dataset
+
+Set `train.dataset` in `config.yaml` to `original` or `fcn`. The selection applies to training, automatic validation, and the default test run:
+
+| Selection | Training | Validation | Test |
+| --- | --- | --- | --- |
+| `original` | `data/train.csv` | `data/validation.csv` | `data/test.csv` |
+| `fcn` | `data/FCN_train.csv` | `data/FCN_validation.csv` | `data/FCN_test.csv` |
+
+The FCN dataset is split 80/10/10 by label using seed 42. The original formatted FCN file remains intact. CSV files are excluded from Git; upload the three FCN files to the Pod separately. You can still use `test.py --csv` to test another file for a single run.
+
 ## Train and validate
 
 Set the model, output model name and training settings in the `train` section of `config.yaml`. Use a Hugging Face repository ID or URL, or `local:Model-1` for a model previously saved under that name. Choose a new `output_model_name` for each completed model; existing final weights are not overwritten. CUDA is detected automatically.
@@ -29,7 +40,7 @@ Set the model, output model name and training settings in the `train` section of
 python3 finetune.py
 ```
 
-Training reads `data/train.csv` and automatically validates the trained model with `data/validation.csv`. The validation labels do not enter the model input and validation does not update the weights. Classifier validation reports accuracy, precision, recall and F1. Generative validation saves the model's responses; metrics are available only when the responses match the labels unambiguously. The `validate.threshold` setting controls classifier validation.
+Training and automatic validation use the CSVs for the selected dataset. The validation labels do not enter the model input and validation does not update the weights. Classifier validation reports accuracy, precision, recall and F1. Generative validation saves the model's responses; metrics are available only when the responses match the labels unambiguously. The `validate.threshold` setting controls classifier validation.
 
 To resume an interrupted run from a saved epoch, use the original settings and pass the checkpoint:
 
@@ -69,7 +80,7 @@ To select a checkpoint for one run:
 python3 test.py --checkpoint /workspace/Original/weights/checkpoints/train-<timestamp>/epoch-001.pt
 ```
 
-By default, testing reads `data/test.csv`. To test another CSV, pass its path (relative paths are relative to the current working directory):
+By default, testing reads the test CSV for the selected dataset. To test another CSV, pass its path (relative paths are relative to the current working directory):
 
 ```bash
 python3 test.py --csv data/another-dataset.csv

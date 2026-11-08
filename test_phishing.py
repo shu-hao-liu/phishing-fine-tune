@@ -67,6 +67,29 @@ class PhishingTests(unittest.TestCase):
             self.assertEqual(p.main('test'), 0)
         self.assertEqual(predict.call_args.args[0]['data']['inference_csv'], str(custom.resolve()))
 
+    def test_fcn_dataset_selection(self):
+        config_path = self.root / 'fcn.yaml'
+        config = yaml.safe_load((p.ROOT / 'config.yaml').read_text())
+        config['train']['dataset'] = 'fcn'
+        config_path.write_text(yaml.safe_dump(config))
+        c = p.read_config(config_path)
+        self.assertEqual(Path(c['data']['train_csv']).name, 'FCN_train.csv')
+        self.assertEqual(Path(c['data']['eval_csv']).name, 'FCN_validation.csv')
+        self.assertEqual(Path(c['data']['inference_csv']).name, 'FCN_test.csv')
+        with patch.object(p, 'read_config', return_value=c), \
+             patch.object(p, 'configure_device', return_value=torch.device('cpu')), \
+             patch.object(p, 'check_optional_vision_dependency'), \
+             patch.object(p, 'setup_run', return_value=self.root), \
+             patch.object(p, 'predict', return_value=self.root / 'predictions.csv') as predict, \
+             patch.object(p, 'save_prediction_metrics'), \
+             patch('sys.argv', ['test.py']):
+            self.assertEqual(p.main('test'), 0)
+        self.assertEqual(Path(predict.call_args.args[0]['data']['inference_csv']).name, 'FCN_test.csv')
+        config['train']['dataset'] = 'unknown'
+        config_path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, 'train.dataset'):
+            p.read_config(config_path)
+
     def test_broken_optional_torchvision_explains_fix(self):
         with patch.object(p.importlib.util, 'find_spec', return_value=object()), \
              patch.object(p.importlib, 'import_module', side_effect=RuntimeError('operator torchvision::nms does not exist')):
