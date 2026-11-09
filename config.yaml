@@ -15,7 +15,7 @@ train:
   seed: 42
   precision: auto
   lora:
-    enabled: false
+    enabled: true
     rank: 8
     alpha: 16
     dropout: 0.05
