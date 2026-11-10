@@ -16,8 +16,8 @@ train:
   precision: auto
   lora:
     enabled: true
-    rank: 8
-    alpha: 16
+    rank: 16
+    alpha: 32
     dropout: 0.05
     target_modules: [query, value]  # XLM-RoBERTa attention layers
   progress_every: 50
