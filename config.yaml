@@ -4,7 +4,7 @@ train:
   model_revision: main
   task: auto
   trust_remote_code: false
-  output_model_name: LORA-v2
+  output_model_name: LORA
   resume_from: null
   epochs: 3
   learning_rate: 5.0e-05
