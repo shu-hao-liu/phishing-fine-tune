@@ -90,6 +90,12 @@ class PhishingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'train.dataset'):
             p.read_config(config_path)
 
+    def test_missing_peft_reports_install_command(self):
+        missing = ModuleNotFoundError("No module named 'peft'", name='peft')
+        with patch.object(p.importlib, 'import_module', side_effect=missing):
+            with self.assertRaisesRegex(RuntimeError, 'pip install -r'):
+                p.check_peft_installed()
+
     def test_broken_optional_torchvision_explains_fix(self):
         with patch.object(p.importlib.util, 'find_spec', return_value=object()), \
              patch.object(p.importlib, 'import_module', side_effect=RuntimeError('operator torchvision::nms does not exist')):

@@ -19,7 +19,10 @@ Install dependencies once:
 
 ```bash
 python3 -m pip install -r requirements.txt
+python3 -c "import peft; print(peft.__version__)"
 ```
+
+The second command verifies PEFT in the same Python environment used to train. If it fails, check the pip output and ensure you are using the intended Python interpreter.
 
 ## Choose a dataset
 

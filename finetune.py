@@ -470,6 +470,18 @@ def checkpoint_identity(c, model, tokenizer, task, device, labels, data_hash):
             'tokenizer_sha256': tokenizer_hash, 'model_commit': getattr(model.config, '_commit_hash', None)}
 
 
+def check_peft_installed():
+    try:
+        importlib.import_module('peft')
+    except ModuleNotFoundError as exc:
+        if exc.name != 'peft':
+            raise
+        raise RuntimeError(
+            f'PEFT is not installed for {sys.executable}. Run: '
+            f'{sys.executable} -m pip install -r {ROOT / "requirements.txt"}'
+        ) from exc
+
+
 def apply_lora(model, task, settings):
     from peft import LoraConfig, get_peft_model
     task_type = {'classification': 'SEQ_CLS', 'causal_lm': 'CAUSAL_LM', 'seq2seq': 'SEQ_2_SEQ_LM'}[task]
@@ -521,6 +533,8 @@ def save_checkpoint(path, state):
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['train']
+    if settings.get('lora', {}).get('enabled', False):
+        check_peft_installed()
     model_root = MODEL_ROOT / validate_model_name(settings['output_model_name']) / 'weights'
     model_dir = model_root / 'final'
     if (model_root.exists() and not settings.get('resume_from')) or model_dir.exists() or (model_root / 'config.json').exists():
@@ -871,6 +885,8 @@ def main(forced_action=None):
         device = configure_device(c)
         check_optional_vision_dependency()
         if args.action == 'check':
+            if c['train'].get('lora', {}).get('enabled', False):
+                check_peft_installed()
             print(f'Configuration valid. Device: {device}; model: {c["train"]["model_source"]}; cache: {c["train"]["cache_dir"]}')
             return 0
         if args.action == 'test':
