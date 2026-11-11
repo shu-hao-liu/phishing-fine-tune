@@ -7,7 +7,7 @@ train:
   output_model_name: LORA
   resume_from: null
   epochs: 3
-  learning_rate: 2.0e-05
+  learning_rate: 5.0e-05
   batch_size: 32
   gradient_accumulation_steps: 1
   weight_decay: 0.01
