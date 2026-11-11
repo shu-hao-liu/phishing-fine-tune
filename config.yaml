@@ -6,8 +6,8 @@ train:
   trust_remote_code: false
   output_model_name: LORA
   resume_from: null
-  epochs: 10
-  learning_rate: 4.0e-05
+  epochs: 20
+  learning_rate: 5.0e-05
   batch_size: 32
   gradient_accumulation_steps: 1
   weight_decay: 0.01
