@@ -1,0 +1,159 @@
+2026-11-12 16:12:18,935 INFO Outputs: /workspace/LORA/outputs/train-20261112T161218932099Z
+2026-11-12 16:12:18,960 INFO Device: cuda (NVIDIA RTX PRO 4500 Blackwell); precision: bf16
+2026-11-12 16:12:20,918 INFO Reading training data: /workspace/data/FCN_train.csv
+2026-11-12 16:12:21,541 INFO Loading training model /workspace/fine-tuned-weights/Original/final (task: classification)
+2026-11-12 16:12:36,823 INFO LoRA enabled: 1181954 trainable of 279227140 parameters
+2026-11-12 16:12:56,836 INFO Training precision: bf16
+2026-11-12 16:12:56,836 INFO Starting training: 2424 records, 76 batches per epoch, 25 epochs
+2026-11-12 16:12:56,837 INFO Epoch 1/25 started
+2026-11-12 16:12:57,508 INFO Epoch 1/25 batch 1/76 loss 1.513658
+2026-11-12 16:13:01,638 INFO Epoch 1/25 batch 50/76 loss 0.418133
+2026-11-12 16:13:03,796 INFO Epoch 1/25 batch 76/76 loss 0.169309
+2026-11-12 16:13:03,797 INFO Epoch 1/25 mean batch loss 0.464036
+2026-11-12 16:13:05,450 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-001.pt
+2026-11-12 16:13:05,451 INFO Epoch 2/25 started
+2026-11-12 16:13:05,574 INFO Epoch 2/25 batch 1/76 loss 0.233774
+2026-11-12 16:13:09,658 INFO Epoch 2/25 batch 50/76 loss 0.184038
+2026-11-12 16:13:11,830 INFO Epoch 2/25 batch 76/76 loss 0.009947
+2026-11-12 16:13:11,831 INFO Epoch 2/25 mean batch loss 0.137189
+2026-11-12 16:13:12,279 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-002.pt
+2026-11-12 16:13:12,279 INFO Epoch 3/25 started
+2026-11-12 16:13:12,405 INFO Epoch 3/25 batch 1/76 loss 0.091983
+2026-11-12 16:13:16,500 INFO Epoch 3/25 batch 50/76 loss 0.004252
+2026-11-12 16:13:18,663 INFO Epoch 3/25 batch 76/76 loss 0.003250
+2026-11-12 16:13:18,663 INFO Epoch 3/25 mean batch loss 0.052527
+2026-11-12 16:13:19,038 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-003.pt
+2026-11-12 16:13:19,038 INFO Epoch 4/25 started
+2026-11-12 16:13:19,163 INFO Epoch 4/25 batch 1/76 loss 0.213917
+2026-11-12 16:13:23,279 INFO Epoch 4/25 batch 50/76 loss 0.001099
+2026-11-12 16:13:25,438 INFO Epoch 4/25 batch 76/76 loss 0.001187
+2026-11-12 16:13:25,438 INFO Epoch 4/25 mean batch loss 0.034619
+2026-11-12 16:13:25,844 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-004.pt
+2026-11-12 16:13:25,845 INFO Epoch 5/25 started
+2026-11-12 16:13:25,969 INFO Epoch 5/25 batch 1/76 loss 0.001724
+2026-11-12 16:13:30,108 INFO Epoch 5/25 batch 50/76 loss 0.000396
+2026-11-12 16:13:32,281 INFO Epoch 5/25 batch 76/76 loss 0.000496
+2026-11-12 16:13:32,281 INFO Epoch 5/25 mean batch loss 0.025459
+2026-11-12 16:13:32,707 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-005.pt
+2026-11-12 16:13:32,708 INFO Epoch 6/25 started
+2026-11-12 16:13:32,829 INFO Epoch 6/25 batch 1/76 loss 0.000346
+2026-11-12 16:13:36,958 INFO Epoch 6/25 batch 50/76 loss 0.000176
+2026-11-12 16:13:39,138 INFO Epoch 6/25 batch 76/76 loss 0.000211
+2026-11-12 16:13:39,138 INFO Epoch 6/25 mean batch loss 0.019577
+2026-11-12 16:13:39,558 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-006.pt
+2026-11-12 16:13:39,559 INFO Epoch 7/25 started
+2026-11-12 16:13:39,682 INFO Epoch 7/25 batch 1/76 loss 0.002801
+2026-11-12 16:13:43,810 INFO Epoch 7/25 batch 50/76 loss 0.003095
+2026-11-12 16:13:45,966 INFO Epoch 7/25 batch 76/76 loss 0.000555
+2026-11-12 16:13:45,967 INFO Epoch 7/25 mean batch loss 0.012057
+2026-11-12 16:13:46,362 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-007.pt
+2026-11-12 16:13:46,363 INFO Epoch 8/25 started
+2026-11-12 16:13:46,489 INFO Epoch 8/25 batch 1/76 loss 0.142806
+2026-11-12 16:13:50,587 INFO Epoch 8/25 batch 50/76 loss 0.000186
+2026-11-12 16:13:52,750 INFO Epoch 8/25 batch 76/76 loss 0.000600
+2026-11-12 16:13:52,751 INFO Epoch 8/25 mean batch loss 0.013515
+2026-11-12 16:13:53,239 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-008.pt
+2026-11-12 16:13:53,240 INFO Epoch 9/25 started
+2026-11-12 16:13:53,365 INFO Epoch 9/25 batch 1/76 loss 0.198320
+2026-11-12 16:13:57,498 INFO Epoch 9/25 batch 50/76 loss 0.000114
+2026-11-12 16:13:59,687 INFO Epoch 9/25 batch 76/76 loss 0.038955
+2026-11-12 16:13:59,688 INFO Epoch 9/25 mean batch loss 0.014195
+2026-11-12 16:14:00,079 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-009.pt
+2026-11-12 16:14:00,080 INFO Epoch 10/25 started
+2026-11-12 16:14:00,207 INFO Epoch 10/25 batch 1/76 loss 0.000930
+2026-11-12 16:14:04,362 INFO Epoch 10/25 batch 50/76 loss 0.000256
+2026-11-12 16:14:06,534 INFO Epoch 10/25 batch 76/76 loss 0.000086
+2026-11-12 16:14:06,535 INFO Epoch 10/25 mean batch loss 0.009489
+2026-11-12 16:14:09,256 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-010.pt
+2026-11-12 16:14:09,257 INFO Epoch 11/25 started
+2026-11-12 16:14:09,384 INFO Epoch 11/25 batch 1/76 loss 0.000198
+2026-11-12 16:14:13,486 INFO Epoch 11/25 batch 50/76 loss 0.000135
+2026-11-12 16:14:15,655 INFO Epoch 11/25 batch 76/76 loss 0.000070
+2026-11-12 16:14:15,656 INFO Epoch 11/25 mean batch loss 0.009818
+2026-11-12 16:14:17,778 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-011.pt
+2026-11-12 16:14:17,779 INFO Epoch 12/25 started
+2026-11-12 16:14:17,906 INFO Epoch 12/25 batch 1/76 loss 0.000377
+2026-11-12 16:14:22,022 INFO Epoch 12/25 batch 50/76 loss 0.000583
+2026-11-12 16:14:24,181 INFO Epoch 12/25 batch 76/76 loss 0.000087
+2026-11-12 16:14:24,181 INFO Epoch 12/25 mean batch loss 0.005639
+2026-11-12 16:14:25,199 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-012.pt
+2026-11-12 16:14:25,200 INFO Epoch 13/25 started
+2026-11-12 16:14:25,324 INFO Epoch 13/25 batch 1/76 loss 0.000043
+2026-11-12 16:14:29,428 INFO Epoch 13/25 batch 50/76 loss 0.000089
+2026-11-12 16:14:31,611 INFO Epoch 13/25 batch 76/76 loss 0.000059
+2026-11-12 16:14:31,611 INFO Epoch 13/25 mean batch loss 0.008876
+2026-11-12 16:14:32,619 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-013.pt
+2026-11-12 16:14:32,620 INFO Epoch 14/25 started
+2026-11-12 16:14:32,745 INFO Epoch 14/25 batch 1/76 loss 0.000069
+2026-11-12 16:14:36,859 INFO Epoch 14/25 batch 50/76 loss 0.000032
+2026-11-12 16:14:39,035 INFO Epoch 14/25 batch 76/76 loss 0.000191
+2026-11-12 16:14:39,036 INFO Epoch 14/25 mean batch loss 0.003634
+2026-11-12 16:14:40,224 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-014.pt
+2026-11-12 16:14:40,224 INFO Epoch 15/25 started
+2026-11-12 16:14:40,351 INFO Epoch 15/25 batch 1/76 loss 0.000052
+2026-11-12 16:14:44,471 INFO Epoch 15/25 batch 50/76 loss 0.000029
+2026-11-12 16:14:46,655 INFO Epoch 15/25 batch 76/76 loss 0.000033
+2026-11-12 16:14:46,656 INFO Epoch 15/25 mean batch loss 0.002496
+2026-11-12 16:14:48,070 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-015.pt
+2026-11-12 16:14:48,070 INFO Epoch 16/25 started
+2026-11-12 16:14:48,197 INFO Epoch 16/25 batch 1/76 loss 0.000046
+2026-11-12 16:14:52,319 INFO Epoch 16/25 batch 50/76 loss 0.000038
+2026-11-12 16:14:54,491 INFO Epoch 16/25 batch 76/76 loss 0.000080
+2026-11-12 16:14:54,492 INFO Epoch 16/25 mean batch loss 0.002157
+2026-11-12 16:14:55,702 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-016.pt
+2026-11-12 16:14:55,702 INFO Epoch 17/25 started
+2026-11-12 16:14:55,831 INFO Epoch 17/25 batch 1/76 loss 0.000049
+2026-11-12 16:14:59,965 INFO Epoch 17/25 batch 50/76 loss 0.000050
+2026-11-12 16:15:02,143 INFO Epoch 17/25 batch 76/76 loss 0.000023
+2026-11-12 16:15:02,144 INFO Epoch 17/25 mean batch loss 0.003959
+2026-11-12 16:15:03,316 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-017.pt
+2026-11-12 16:15:03,317 INFO Epoch 18/25 started
+2026-11-12 16:15:03,440 INFO Epoch 18/25 batch 1/76 loss 0.000033
+2026-11-12 16:15:07,571 INFO Epoch 18/25 batch 50/76 loss 0.000020
+2026-11-12 16:15:09,748 INFO Epoch 18/25 batch 76/76 loss 0.000029
+2026-11-12 16:15:09,749 INFO Epoch 18/25 mean batch loss 0.001149
+2026-11-12 16:15:10,907 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-018.pt
+2026-11-12 16:15:10,908 INFO Epoch 19/25 started
+2026-11-12 16:15:11,036 INFO Epoch 19/25 batch 1/76 loss 0.000033
+2026-11-12 16:15:15,161 INFO Epoch 19/25 batch 50/76 loss 0.000029
+2026-11-12 16:15:17,332 INFO Epoch 19/25 batch 76/76 loss 0.316429
+2026-11-12 16:15:17,333 INFO Epoch 19/25 mean batch loss 0.006707
+2026-11-12 16:15:19,423 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-019.pt
+2026-11-12 16:15:19,423 INFO Epoch 20/25 started
+2026-11-12 16:15:19,551 INFO Epoch 20/25 batch 1/76 loss 0.000025
+2026-11-12 16:15:23,683 INFO Epoch 20/25 batch 50/76 loss 0.000026
+2026-11-12 16:15:25,865 INFO Epoch 20/25 batch 76/76 loss 0.000017
+2026-11-12 16:15:25,866 INFO Epoch 20/25 mean batch loss 0.000561
+2026-11-12 16:15:27,001 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-020.pt
+2026-11-12 16:15:27,002 INFO Epoch 21/25 started
+2026-11-12 16:15:27,126 INFO Epoch 21/25 batch 1/76 loss 0.000039
+2026-11-12 16:15:31,252 INFO Epoch 21/25 batch 50/76 loss 0.000043
+2026-11-12 16:15:33,443 INFO Epoch 21/25 batch 76/76 loss 0.000036
+2026-11-12 16:15:33,443 INFO Epoch 21/25 mean batch loss 0.000758
+2026-11-12 16:15:34,589 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-021.pt
+2026-11-12 16:15:34,589 INFO Epoch 22/25 started
+2026-11-12 16:15:34,715 INFO Epoch 22/25 batch 1/76 loss 0.000019
+2026-11-12 16:15:38,852 INFO Epoch 22/25 batch 50/76 loss 0.000019
+2026-11-12 16:15:41,048 INFO Epoch 22/25 batch 76/76 loss 0.000026
+2026-11-12 16:15:41,049 INFO Epoch 22/25 mean batch loss 0.003090
+2026-11-12 16:15:43,615 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-022.pt
+2026-11-12 16:15:43,616 INFO Epoch 23/25 started
+2026-11-12 16:15:43,741 INFO Epoch 23/25 batch 1/76 loss 0.000080
+2026-11-12 16:15:47,909 INFO Epoch 23/25 batch 50/76 loss 0.000020
+2026-11-12 16:15:50,107 INFO Epoch 23/25 batch 76/76 loss 0.000017
+2026-11-12 16:15:50,108 INFO Epoch 23/25 mean batch loss 0.000353
+2026-11-12 16:15:51,259 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-023.pt
+2026-11-12 16:15:51,260 INFO Epoch 24/25 started
+2026-11-12 16:15:51,386 INFO Epoch 24/25 batch 1/76 loss 0.000031
+2026-11-12 16:15:55,554 INFO Epoch 24/25 batch 50/76 loss 0.000020
+2026-11-12 16:15:57,745 INFO Epoch 24/25 batch 76/76 loss 0.000013
+2026-11-12 16:15:57,746 INFO Epoch 24/25 mean batch loss 0.003290
+2026-11-12 16:15:58,996 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-024.pt
+2026-11-12 16:15:58,997 INFO Epoch 25/25 started
+2026-11-12 16:15:59,125 INFO Epoch 25/25 batch 1/76 loss 0.000022
+2026-11-12 16:16:03,289 INFO Epoch 25/25 batch 50/76 loss 0.000035
+2026-11-12 16:16:05,468 INFO Epoch 25/25 batch 76/76 loss 0.000044
+2026-11-12 16:16:05,469 INFO Epoch 25/25 mean batch loss 0.000685
+2026-11-12 16:16:06,655 INFO Saved checkpoint: /workspace/LORA/weights/checkpoints/train-20261112T161218932099Z/epoch-025.pt
+2026-11-12 16:16:07,171 INFO Validation metrics: {"count": 303, "accuracy": 0.976897689768977, "precision": 1.0, "recall": 0.9653465346534653, "f1": 0.982367758186398, "true_positives": 195, "false_positives": 0, "true_negatives": 101, "false_negatives": 7, "positive_label": "1.0", "threshold": 0.5, "checkpoint": "epoch-025"}
+2026-11-12 16:16:11,356 INFO Saved trained model to /workspace/LORA/weights/final
