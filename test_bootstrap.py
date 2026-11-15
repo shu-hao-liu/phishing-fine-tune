@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from bootstrap_test import bootstrap_metrics, load_counts
+from bootstrap_test import bootstrap_metrics, compare_independent, load_counts
 
 
 class BootstrapTests(unittest.TestCase):
@@ -54,6 +54,35 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(saved['point_metrics']['accuracy'], .5)
         self.assertEqual(saved['positive_label'], 'phish')
         self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
+
+    def test_independent_comparison_uses_model_b_minus_model_a(self):
+        first = (10, 10, 10, 10)
+        second = (40, 0, 40, 0)
+        b, comparison = compare_independent(first, second, resamples=2000, seed=42)
+        self.assertEqual(b['point_metrics']['accuracy'], 1.0)
+        self.assertEqual(comparison['direction'], 'model_b_minus_model_a')
+        self.assertEqual(comparison['metrics']['accuracy']['estimate'], .5)
+        low, high = comparison['metrics']['accuracy']['confidence_interval']
+        self.assertGreater(low, 0)
+        self.assertLessEqual(high, 1)
+        self.assertEqual((b, comparison), compare_independent(first, second, resamples=2000, seed=42))
+
+    def test_compare_cli_different_datasets(self):
+        a = self.root / 'a.csv'
+        b = self.root / 'b.csv'
+        a.write_text('label,predicted_label\n' + '1.0,1.0\n' * 4 + '0.0,0.0\n' * 4)
+        b.write_text('actual,result\n' + 'phish,phish\n' * 8 + 'safe,safe\n' * 4 + 'safe,phish\n' * 4)
+        output = self.root / 'compare.json'
+        cmd = [sys.executable, str(Path(__file__).parent / 'bootstrap_test.py'), str(a), '--compare', str(b),
+               '--compare-label-column', 'actual', '--compare-prediction-column', 'result',
+               '--compare-positive-label', 'phish', '--resamples', '1000', '--output', str(output)]
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        saved = json.loads(output.read_text())
+        self.assertEqual(saved['point_metrics']['count'], 8)
+        self.assertEqual(saved['model_b']['point_metrics']['count'], 16)
+        self.assertEqual(saved['comparison']['metrics']['accuracy']['estimate'], -.25)
+        self.assertIn('do not isolate model performance', saved['comparison']['notes'][1])
 
     def test_invalid_input_and_configuration(self):
         path = self.root / 'bad.csv'
