@@ -4,3 +4,4 @@ transformers==4.57.0
 PyYAML==6.0.3
 peft==0.20.0
 nvidia-ml-py>=12,<14
+numpy>=1.23.5,<3
