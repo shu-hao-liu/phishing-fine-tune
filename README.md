@@ -95,19 +95,19 @@ python3 test.py --csv data/another-dataset.csv
 
 You can combine `--csv` with `--checkpoint`. The CSV must contain the configured text column (`body` by default). Include the configured label column (`label` by default) with labels matching the model and positive label to calculate metrics. The label is not included in model input; it is retained in the output for scoring. Classifiers produce predictions and metrics. Generative models produce responses and are scored only when their responses match the labels exactly.
 
-## Bootstrap confidence intervals and comparison
+## Bootstrap confidence intervals
 
-`bootstrap_test.py` runs on a local CPU using prediction CSVs from `test.py`; it does not load the model or re-run inference. First obtain `predictions.csv` for each model and dataset, then copy them to your local machine. The CSVs need ground-truth labels and predicted labels. Install Python dependencies with `python3 -m pip install numpy PyYAML` for this standalone tool.
+Run `bootstrap_test.py` locally on one model's predictions CSV at a time. It uses the labels and predictions already in the CSV, so it does not load the model or rerun inference. Install the standalone dependencies with `python3 -m pip install numpy PyYAML`.
 
 ```bash
-python3 bootstrap_test.py model-a-predictions.csv --compare model-b-predictions.csv
+python3 bootstrap_test.py model-predictions.csv --output bootstrap-results.json
 ```
 
-The output includes accuracy, precision, recall and F1 with percentile bootstrap confidence intervals for both files, and intervals for their differences (model B minus model A). Results default to 10,000 independent resamples, 95% confidence, seed 42, and `bootstrap_results.json` alongside the first CSV. For a single dataset, omit `--compare`. Use `--output result.json`, `--resamples 5000`, `--confidence 0.90`, or `--seed 123` as needed. Existing result files are not overwritten.
+The output includes accuracy, precision, recall and F1 with percentile bootstrap confidence intervals. Defaults are 10,000 resamples, 95% confidence and seed 42. Use `--resamples`, `--confidence`, and `--seed` to change them. Existing files are not overwritten. Without `--output`, results are saved as `bootstrap_results.json` beside the predictions CSV.
 
-By default, columns and positive label come from `config.yaml` (`label`, `1.0`), and predictions use `predicted_label` or `model_response`. For other CSV formats, use `--label-column`, `--prediction-column`, and `--positive-label`. For the second CSV, use `--compare-label-column`, `--compare-prediction-column`, and `--compare-positive-label` when different. Labels must be binary and match the predictions exactly. `null` intervals with an `undefined_resamples` count mean some resamples lacked the denominator needed for that metric.
+The default label column and positive value come from `config.yaml` (`label`, `1.0`); predictions use `predicted_label` or `model_response`. Use `--label-column`, `--prediction-column`, and `--positive-label` for other formats. Labels must be binary and match the predictions exactly. A `null` interval with an `undefined_resamples` count means some resamples lacked the denominator for that metric.
 
-For two models tested on the same examples in the same order, add `--paired`. The tool verifies matching shared input columns; use `--pair-column id` (repeatable) to specify stable matching columns when needed. It then resamples the same examples for both models. Without `--paired`, the comparison assumes independent datasets and independently resamples their rows. If datasets overlap or contain related examples, its uncertainty estimates may not be appropriate. Different datasets can explain observed differences, so this analysis does not isolate which model is better.
+The bootstrap assumes rows are independent. Related or repeated examples may require grouped resampling. These single-model intervals are not confidence intervals for differences between models.
 
 ## Files produced
 

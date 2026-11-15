@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from bootstrap_test import bootstrap_metrics, compare_independent, compare_paired, load_counts, paired_counts
+from bootstrap_test import bootstrap_metrics, load_counts
 
 
 class BootstrapTests(unittest.TestCase):
@@ -54,66 +54,6 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(saved['point_metrics']['accuracy'], .5)
         self.assertEqual(saved['positive_label'], 'phish')
         self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
-
-    def test_independent_comparison_uses_model_b_minus_model_a(self):
-        first = (10, 10, 10, 10)
-        second = (40, 0, 40, 0)
-        b, comparison = compare_independent(first, second, resamples=2000, seed=42)
-        self.assertEqual(b['point_metrics']['accuracy'], 1.0)
-        self.assertEqual(comparison['direction'], 'model_b_minus_model_a')
-        self.assertEqual(comparison['metrics']['accuracy']['estimate'], .5)
-        low, high = comparison['metrics']['accuracy']['confidence_interval']
-        self.assertGreater(low, 0)
-        self.assertLessEqual(high, 1)
-        self.assertEqual((b, comparison), compare_independent(first, second, resamples=2000, seed=42))
-
-    def test_compare_cli_different_datasets(self):
-        a = self.root / 'a.csv'
-        b = self.root / 'b.csv'
-        a.write_text('label,predicted_label\n' + '1.0,1.0\n' * 4 + '0.0,0.0\n' * 4)
-        b.write_text('actual,result\n' + 'phish,phish\n' * 8 + 'safe,safe\n' * 4 + 'safe,phish\n' * 4)
-        output = self.root / 'compare.json'
-        cmd = [sys.executable, str(Path(__file__).parent / 'bootstrap_test.py'), str(a), '--compare', str(b),
-               '--compare-label-column', 'actual', '--compare-prediction-column', 'result',
-               '--compare-positive-label', 'phish', '--resamples', '1000', '--output', str(output)]
-        process = subprocess.run(cmd, capture_output=True, text=True)
-        self.assertEqual(process.returncode, 0, process.stderr)
-        saved = json.loads(output.read_text())
-        self.assertEqual(saved['point_metrics']['count'], 8)
-        self.assertEqual(saved['model_b']['point_metrics']['count'], 16)
-        self.assertEqual(saved['comparison']['metrics']['accuracy']['estimate'], -.25)
-        self.assertIn('do not isolate model performance', saved['comparison']['notes'][1])
-
-    def test_paired_comparison_preserves_correlations(self):
-        a = self.root / 'paired-a.csv'
-        b = self.root / 'paired-b.csv'
-        text = 'id,label,predicted_label\n' + ''.join(f'{i},{i % 2},{i % 2}\n' for i in range(20))
-        a.write_text(text)
-        b.write_text(text)
-        joint, columns = paired_counts(a, b, 'label', 'label', '1', '1', 'predicted_label', 'predicted_label')
-        self.assertEqual(columns, ['id'])
-        _, _, _, _, difference = compare_paired(joint, resamples=1000, seed=42)
-        for metric in ('accuracy', 'precision', 'recall', 'f1'):
-            self.assertEqual(difference['metrics'][metric]['estimate'], 0)
-            self.assertEqual(difference['metrics'][metric]['confidence_interval'], [0, 0])
-        lines = text.splitlines()
-        b.write_text('\n'.join([lines[0]] + list(reversed(lines[1:]))) + '\n')
-        with self.assertRaisesRegex(ValueError, 'align the files'):
-            paired_counts(a, b, 'label', 'label', '1', '1', 'predicted_label', 'predicted_label')
-
-    def test_paired_cli_rejects_mismatch_and_works(self):
-        a = self.root / 'a.csv'
-        b = self.root / 'b.csv'
-        a.write_text('id,label,predicted_label\n' + ''.join(f'{i},{i % 2},{i % 2}\n' for i in range(20)))
-        b.write_text(a.read_text())
-        out = self.root / 'paired.json'
-        cmd = [sys.executable, str(Path(__file__).parent / 'bootstrap_test.py'), str(a), '--compare', str(b),
-               '--paired', '--positive-label', '1', '--resamples', '500', '--output', str(out)]
-        process = subprocess.run(cmd, capture_output=True, text=True)
-        self.assertEqual(process.returncode, 0, process.stderr)
-        result = json.loads(out.read_text())
-        self.assertEqual(result['comparison']['metrics']['accuracy']['confidence_interval'], [0, 0])
-        self.assertEqual(result['comparison']['pair_columns'], ['id'])
 
     def test_invalid_input_and_configuration(self):
         path = self.root / 'bad.csv'
