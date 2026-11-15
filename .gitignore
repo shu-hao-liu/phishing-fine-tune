@@ -20,3 +20,6 @@ __pycache__/
 # Temporary split files may contain dataset records.
 .split-train-*
 .split-inference-*
+
+# Local evaluation results.
+bootstrap-results/
