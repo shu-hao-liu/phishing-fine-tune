@@ -53,6 +53,10 @@ python3 finetune.py --resume /workspace/Original/weights/checkpoints/train-<time
 
 You can instead set `train.resume_from` in the config. The training data, model, tokenizer, device type, precision and training settings must match the checkpoint. Load checkpoints only from trusted sources.
 
+## Compare GPU memory
+
+Each completed GPU training run logs peak PyTorch GPU memory for model loading, training and checkpointing. It also samples PyTorch allocated/reserved memory and device-wide GPU utilization every 0.5 seconds during training epochs and checkpointing, and logs their sample averages. Results and sample counts are saved as `training_gpu_memory` in the run's `metadata.json`; utilization can be unavailable if NVIDIA monitoring is unsupported. GPU utilization includes other processes and NVIDIA reports it over a driver-defined sampling window. The averages are sampled estimates, not exact time-weighted measurements. Peak and average measurements do not include validation or final-model saving; the peak also includes model loading. CPU runs report no GPU memory. Reserved memory includes allocated memory; neither includes memory allocated outside PyTorch, and they should not be added together. Compare FFT and LoRA using the same model, dataset, batch size, sequence length, precision and GPU.
+
 ## LoRA fine-tuning
 
 To train LoRA adapters instead of updating the full base model, set `train.lora.enabled: true` in `config.yaml`. The other LoRA settings control rank, alpha, dropout, and target module names. The default `[query, value]` targets XLM-RoBERTa; other architectures may need different names, or `target_modules: null` where PEFT supports automatic selection. For classifiers, the classification head is also trained.

@@ -1,5 +1,5 @@
 train:
-  dataset: fcn  # original or fcn
+  dataset: original  # original or fcn
   model_source: local:Original
   model_revision: main
   task: auto

@@ -26,7 +26,7 @@ class PhishingTests(unittest.TestCase):
         self.c['data'].update(train_csv=str(self.root / 'train' / 'train.csv'), inference_csv=str(self.root / 'infer' / 'data.csv'), eval_csv=None, text_column='text', positive_label='phishing', max_length=16)
         self.c['train']['task'] = 'classification'
         self.c['inference']['task'] = 'classification'
-        self.c['train'].update(output_model_name='Model-1', epochs=1, batch_size=2, gradient_accumulation_steps=2)
+        self.c['train'].update(model_source='example/model', lora={'enabled': False}, output_model_name='Model-1', epochs=1, batch_size=2, gradient_accumulation_steps=2)
         self.c['train']['output_dir'] = self.c['inference']['output_dir'] = str(self.root / 'out')
         for name in ('train', 'infer'):
             (self.root / name).mkdir()
@@ -103,6 +103,42 @@ class PhishingTests(unittest.TestCase):
                 p.check_optional_vision_dependency()
         with patch.object(p.importlib.util, 'find_spec', return_value=None):
             p.check_optional_vision_dependency()
+
+    def test_training_gpu_memory_measurement(self):
+        cpu = torch.device('cpu')
+        self.assertIsNone(p.training_memory_measurement(cpu))
+        device = torch.device('cuda:0')
+        with patch.object(torch.cuda, 'synchronize') as sync, \
+             patch.object(torch.cuda, 'reset_peak_memory_stats') as reset, \
+             patch.object(torch.cuda, 'max_memory_allocated', return_value=123), \
+             patch.object(torch.cuda, 'max_memory_reserved', return_value=456):
+            p.start_training_memory_measurement(device)
+            memory = p.training_memory_measurement(device)
+        self.assertEqual(memory['peak_allocated_bytes'], 123)
+        self.assertEqual(memory['peak_reserved_bytes'], 456)
+        reset.assert_called_once_with(device)
+        self.assertEqual(sync.call_count, 2)
+
+    def test_average_gpu_sampling_and_unavailable_utilization(self):
+        device = torch.device('cuda:0')
+        sampler = p.TrainingGpuSampler(device)
+        with patch.object(torch.cuda, 'memory_allocated', side_effect=[100, 300]), \
+             patch.object(torch.cuda, 'memory_reserved', side_effect=[200, 400]), \
+             patch.object(torch.cuda, 'utilization', side_effect=[20, 80]):
+            sampler.sample()
+            sampler.sample()
+        result = sampler.result()
+        self.assertEqual(result['average_allocated_bytes'], 200)
+        self.assertEqual(result['average_reserved_bytes'], 300)
+        self.assertEqual(result['average_gpu_utilization_percent'], 50)
+        self.assertEqual(result['utilization_samples'], 2)
+        unavailable = p.TrainingGpuSampler(device)
+        with patch.object(torch.cuda, 'memory_allocated', return_value=100), \
+             patch.object(torch.cuda, 'memory_reserved', return_value=200), \
+             patch.object(torch.cuda, 'utilization', side_effect=RuntimeError('NVML unavailable')):
+            unavailable.sample()
+        self.assertIsNone(unavailable.result()['average_gpu_utilization_percent'])
+        self.assertIn('NVML unavailable', unavailable.result()['utilization_error'])
 
     def test_automatic_precision(self):
         self.c['train']['precision'] = 'auto'

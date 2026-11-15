@@ -17,6 +17,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 from urllib.parse import urlparse
 
 import torch
@@ -530,6 +531,74 @@ def save_checkpoint(path, state):
             tmp.unlink(missing_ok=True)
 
 
+def start_training_memory_measurement(device):
+    if device.type == 'cuda':
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+
+
+def training_memory_measurement(device):
+    if device.type != 'cuda':
+        return None
+    torch.cuda.synchronize(device)
+    return {'peak_allocated_bytes': torch.cuda.max_memory_allocated(device),
+            'peak_reserved_bytes': torch.cuda.max_memory_reserved(device),
+            'scope': 'pytorch_training_including_model_loading_and_checkpointing'}
+
+
+class TrainingGpuSampler:
+    """Sample PyTorch memory and device-wide GPU utilization during epochs."""
+    def __init__(self, device, interval=0.5):
+        self.device = device
+        self.interval = interval
+        self.allocated = []
+        self.reserved = []
+        self.utilization = []
+        self.utilization_error = None
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def sample(self):
+        self.allocated.append(torch.cuda.memory_allocated(self.device))
+        self.reserved.append(torch.cuda.memory_reserved(self.device))
+        if self.utilization_error is None:
+            try:
+                self.utilization.append(torch.cuda.utilization(self.device))
+            except Exception as exc:
+                self.utilization_error = f'{type(exc).__name__}: {exc}'
+
+    def _run(self):
+        while not self.stop_event.is_set():
+            try:
+                self.sample()
+            except Exception as exc:
+                LOG.warning('GPU memory sampling stopped: %s', exc)
+                break
+            self.stop_event.wait(self.interval)
+
+    def start(self):
+        if self.device.type == 'cuda':
+            self.thread = threading.Thread(target=self._run, name='gpu-usage-sampler', daemon=True)
+            self.thread.start()
+
+    def stop(self):
+        if self.thread is not None:
+            self.stop_event.set()
+            self.thread.join()
+
+    def result(self):
+        def average(values):
+            return sum(values) / len(values) if values else None
+        return {'average_allocated_bytes': average(self.allocated),
+                'average_reserved_bytes': average(self.reserved),
+                'average_gpu_utilization_percent': average(self.utilization),
+                'memory_samples': len(self.allocated),
+                'utilization_samples': len(self.utilization),
+                'sampling_interval_seconds': self.interval,
+                'utilization_error': self.utilization_error,
+                'average_scope': 'training_epochs_and_checkpointing'}
+
+
 def train(c, out, device):
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
     data, settings = c['data'], c['train']
@@ -539,6 +608,7 @@ def train(c, out, device):
     model_dir = model_root / 'final'
     if (model_root.exists() and not settings.get('resume_from')) or model_dir.exists() or (model_root / 'config.json').exists():
         raise FileExistsError(f'Trained model directory already exists: {model_root}; choose a different output_model_name')
+    start_training_memory_measurement(device)
     LOG.info('Reading training data: %s', data['train_csv'])
     _, rows = read_csv(data['train_csv'], data['text_column'], data['label_column'])
     train_hash = sha256(data['train_csv'])
@@ -608,37 +678,58 @@ def train(c, out, device):
         if device.type == 'cuda':
             torch.cuda.set_rng_state_all(checkpoint['cuda_rng'])
         LOG.info('Resuming after epoch %d from %s', start_epoch, settings['resume_from'])
-    LOG.info('Starting training: %d records, %d batches per epoch, %d epochs', len(rows), len(loader), settings['epochs'])
-    for epoch in range(start_epoch, settings['epochs']):
-        LOG.info('Epoch %d/%d started', epoch + 1, settings['epochs'])
-        model.train()
-        total_loss = 0.0
-        for i, batch in enumerate(loader):
-            batch = {k: v.to(device) for k, v in batch.items()}
-            group_size = min(accum, len(loader) - (i // accum) * accum)
-            with autocast(device, precision):
-                loss = model(**batch).loss
-            if not torch.isfinite(loss):
-                raise RuntimeError('Non-finite training loss; no final model will be saved')
-            total_loss += loss.item()
-            scaler.scale(loss / group_size).backward()
-            if (i + 1) % accum == 0 or i + 1 == len(loader):
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), settings['max_grad_norm'])
-                scaler.step(optimizer)
-                scaler.update()
-                scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-            if i == 0 or (i + 1) % settings.get('progress_every', 1) == 0 or i + 1 == len(loader):
-                LOG.info('Epoch %d/%d batch %d/%d loss %.6f', epoch + 1, settings['epochs'], i + 1, len(loader), loss.item())
-        LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
-        checkpoint_path = model_root / 'checkpoints' / out.name / f'epoch-{epoch + 1:03d}.pt'
-        save_checkpoint(checkpoint_path, {'format_version': 1, 'epoch': epoch + 1, 'identity': identity,
-                        'model': checkpoint_model_state(model, lora_enabled), 'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(), 'scaler': scaler.state_dict(),
-                        'python_rng': random.getstate(), 'torch_rng': torch.get_rng_state(),
-                        'cuda_rng': torch.cuda.get_rng_state_all() if device.type == 'cuda' else None})
-        LOG.info('Saved checkpoint: %s', checkpoint_path)
+    gpu_sampler = TrainingGpuSampler(device)
+    gpu_sampler.start()
+    try:
+        LOG.info('Starting training: %d records, %d batches per epoch, %d epochs', len(rows), len(loader), settings['epochs'])
+        for epoch in range(start_epoch, settings['epochs']):
+            LOG.info('Epoch %d/%d started', epoch + 1, settings['epochs'])
+            model.train()
+            total_loss = 0.0
+            for i, batch in enumerate(loader):
+                batch = {k: v.to(device) for k, v in batch.items()}
+                group_size = min(accum, len(loader) - (i // accum) * accum)
+                with autocast(device, precision):
+                    loss = model(**batch).loss
+                if not torch.isfinite(loss):
+                    raise RuntimeError('Non-finite training loss; no final model will be saved')
+                total_loss += loss.item()
+                scaler.scale(loss / group_size).backward()
+                if (i + 1) % accum == 0 or i + 1 == len(loader):
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), settings['max_grad_norm'])
+                    scaler.step(optimizer)
+                    scaler.update()
+                    scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+                if i == 0 or (i + 1) % settings.get('progress_every', 1) == 0 or i + 1 == len(loader):
+                    LOG.info('Epoch %d/%d batch %d/%d loss %.6f', epoch + 1, settings['epochs'], i + 1, len(loader), loss.item())
+            LOG.info('Epoch %d/%d mean batch loss %.6f', epoch + 1, settings['epochs'], total_loss / len(loader))
+            checkpoint_path = model_root / 'checkpoints' / out.name / f'epoch-{epoch + 1:03d}.pt'
+            save_checkpoint(checkpoint_path, {'format_version': 1, 'epoch': epoch + 1, 'identity': identity,
+                            'model': checkpoint_model_state(model, lora_enabled), 'optimizer': optimizer.state_dict(),
+                            'scheduler': scheduler.state_dict(), 'scaler': scaler.state_dict(),
+                            'python_rng': random.getstate(), 'torch_rng': torch.get_rng_state(),
+                            'cuda_rng': torch.cuda.get_rng_state_all() if device.type == 'cuda' else None})
+            LOG.info('Saved checkpoint: %s', checkpoint_path)
+    finally:
+        gpu_sampler.stop()
+    training_memory = training_memory_measurement(device)
+    if training_memory is not None:
+        training_memory.update(gpu_sampler.result())
+        if training_memory['average_allocated_bytes'] is not None:
+            LOG.info('Training average GPU memory (sampled PyTorch): allocated %.2f GiB, reserved %.2f GiB',
+                     training_memory['average_allocated_bytes'] / 1024**3,
+                     training_memory['average_reserved_bytes'] / 1024**3)
+        if training_memory['average_gpu_utilization_percent'] is not None:
+            LOG.info('Training average GPU utilization (device-wide): %.2f%%', training_memory['average_gpu_utilization_percent'])
+        else:
+            LOG.warning('Average GPU utilization unavailable: %s', training_memory['utilization_error'] or 'no samples')
+        LOG.info('Training peak GPU memory (PyTorch): allocated %.2f GiB, reserved %.2f GiB',
+                 training_memory['peak_allocated_bytes'] / 1024**3,
+                 training_memory['peak_reserved_bytes'] / 1024**3)
+    else:
+        LOG.info('Training peak GPU memory: unavailable (CPU training)')
     if evaluation and task != 'classification':
         validation_config = dict(c)
         validation_config['data'] = dict(data, inference_csv=data['eval_csv'], selected_dataset='validation')
@@ -676,6 +767,7 @@ def train(c, out, device):
         shutil.rmtree(model_dir)
         raise
     metadata = common_metadata(c, device)
+    metadata['training_gpu_memory'] = training_memory
     metadata.update({'resolved_model_revision': getattr(model.config, '_commit_hash', None), 'resolved_tokenizer_revision': tokenizer.init_kwargs.get('_commit_hash'), 'task': task, 'labels': labels if labels is not None else classes, 'trained_model_dir': str(model_dir), 'training_csv_sha256': train_hash, 'eval_csv_sha256': sha256(data['eval_csv']) if data.get('eval_csv') else None})
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     LOG.info('Saved trained model to %s', model_dir)
