@@ -107,7 +107,7 @@ The output includes accuracy, precision, recall and F1 with percentile bootstrap
 
 By default, columns and positive label come from `config.yaml` (`label`, `1.0`), and predictions use `predicted_label` or `model_response`. For other CSV formats, use `--label-column`, `--prediction-column`, and `--positive-label`. For the second CSV, use `--compare-label-column`, `--compare-prediction-column`, and `--compare-positive-label` when different. Labels must be binary and match the predictions exactly. `null` intervals with an `undefined_resamples` count mean some resamples lacked the denominator needed for that metric.
 
-The comparison assumes independent datasets and independently resamples their rows; it is not a paired comparison. If datasets overlap or contain related examples, its uncertainty estimates may not be appropriate. Different datasets can explain observed differences, so this analysis does not isolate which model is better.
+For two models tested on the same examples in the same order, add `--paired`. The tool verifies matching shared input columns; use `--pair-column id` (repeatable) to specify stable matching columns when needed. It then resamples the same examples for both models. Without `--paired`, the comparison assumes independent datasets and independently resamples their rows. If datasets overlap or contain related examples, its uncertainty estimates may not be appropriate. Different datasets can explain observed differences, so this analysis does not isolate which model is better.
 
 ## Files produced
 
