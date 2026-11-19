@@ -109,6 +109,25 @@ The default label column and positive value come from `config.yaml` (`label`, `1
 
 The bootstrap assumes rows are independent. Related or repeated examples may require grouped resampling. These single-model intervals are not confidence intervals for differences between models.
 
+## ROC-AUC
+
+Use `roc_auc_test.py` on a labeled predictions CSV. It measures how well the model ranks phishing examples above legitimate examples across thresholds, using `phishing_probability` as the positive-class score and the configured positive label (`1.0` by default). It runs locally on CPU:
+
+```bash
+python3 roc_auc_test.py 'LORA/LORA En/predictions.csv'
+```
+
+Optionally save a summary, the ROC points, and a curve image (plotting requires matplotlib):
+
+```bash
+python3 roc_auc_test.py 'LORA/LORA En/predictions.csv' \
+  --output bootstrap-results/lora-en-roc.json \
+  --curve-csv bootstrap-results/lora-en-roc.csv \
+  --plot bootstrap-results/lora-en-roc.png
+```
+
+Use `--label-column`, `--score-column`, and `--positive-label` for other datasets. Scores must be finite numbers, with larger values indicating the positive class; both ground-truth classes must be present. The input and existing output files are never overwritten. ROC-AUC does not measure performance at a particular classification threshold, and a high score does not guarantee good probability calibration.
+
 ## Compare classifiers with McNemar's test
 
 Use `mcnemar_test.py` locally to compare two models on the **same labeled examples in the same order**:
