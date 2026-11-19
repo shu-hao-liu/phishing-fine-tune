@@ -144,3 +144,19 @@ python3 format_csv.py data/raw.csv data/formatted.csv --mode train \
 `--mode` is `train`, `validate`, or `test`. The example maps the source columns and labels to the configured text and label columns, with `1.0` for phishing and `0.0` for legitimate by default. Omit the column and label mapping options when the source already uses the configured column names and labels. To format a test dataset with no label column, use `--mode test --unlabeled`; it produces predictions without metrics.
 
 The output retains the subject, text, URLs, label, language and source columns when available; missing optional columns are empty and other columns are omitted. All rows are preserved in order. The formatter reports invalid or missing text and labels instead of silently dropping records. Training requires both classes. Upload or move the formatted file to the appropriate dataset name if you want to use it for training or validation. For testing, pass its path with `python3 test.py --csv data/formatted.csv`.
+
+## Remove CSV columns
+
+To remove the `urls` column from one or more CSVs while retaining every other value and row, run:
+
+```bash
+python3 remove_url_column.py data/FCN_train.csv data/FCN_test.csv
+```
+
+To remove different columns, pass their names as a comma-separated list:
+
+```bash
+python3 remove_url_column.py --columns subject,language,source data/FCN_train.csv data/FCN_test.csv
+```
+
+The tool first creates a separate backup beside every affected file: `.before-url-removal.csv` for the default URL removal, or `.before-column-removal.csv` for other column selections. It refuses to overwrite an existing backup. Files without any selected columns are left unchanged. Removing columns changes the file hash; an existing training checkpoint may require the original backup when resuming.
