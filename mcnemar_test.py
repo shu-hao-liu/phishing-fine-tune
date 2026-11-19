@@ -65,7 +65,7 @@ def compare_csvs(path_a, path_b, *, label_column='label', prediction_a=None, pre
                         if name in fields_a and name in fields_b and name not in forbidden), None)
             if key is None:
                 raise ValueError('No shared body, text, or ID column; supply --match-column')
-            match_columns = [key]
+            match_columns = [name for name in fields_a if name in fields_b and name not in forbidden]
         if not match_columns or any(not key or key not in fields_a or key not in fields_b or key in forbidden for key in match_columns):
             raise ValueError('Match columns must exist in both files and cannot be labels or predictions')
         for index, (row_a, row_b) in enumerate(zip_longest(a, b), start=1):
@@ -118,7 +118,7 @@ def main():
     parser.add_argument('--label-column', default='label')
     parser.add_argument('--prediction-a', help='prediction column in model A CSV')
     parser.add_argument('--prediction-b', help='prediction column in model B CSV')
-    parser.add_argument('--match-column', action='append', help='matching example column; can be repeated (default: body, id or text)')
+    parser.add_argument('--match-column', action='append', help='matching example column; can be repeated (default: shared input columns)')
     parser.add_argument('--output', help='save results to a new JSON file')
     args = parser.parse_args()
     try:
