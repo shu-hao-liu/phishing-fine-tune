@@ -109,6 +109,19 @@ The default label column and positive value come from `config.yaml` (`label`, `1
 
 The bootstrap assumes rows are independent. Related or repeated examples may require grouped resampling. These single-model intervals are not confidence intervals for differences between models.
 
+## Compare classifiers with McNemar's test
+
+Use `mcnemar_test.py` locally to compare two models on the **same labeled examples in the same order**:
+
+```bash
+python3 mcnemar_test.py 'FFT/FFT EN/predictions.csv' 'LORA/LORA En/predictions.csv' \
+  --output bootstrap-results/mcnemar-fft-vs-lora-en.json
+```
+
+The exact two-sided test reports how often only each model was correct, both were correct or both were wrong, their accuracy difference, and a p-value. It checks the label and shared input columns in every row; use `--match-column body` (repeat for several columns) if you need to choose matching columns. Use `--label-column`, `--prediction-a`, or `--prediction-b` for other CSV column names. The output is printed; `--output` optionally saves a new JSON file without overwriting existing files.
+
+The test concerns overall errors, not F1, precision or recall. It assumes independent examples; check `duplicate_match_keys` and investigate duplicate or related rows. The p-value is unadjusted for multiple model comparisons. Predictions must use the same label values as the ground truth.
+
 ## Files produced
 
 - Model and tokenizer: `/workspace/<model>/weights/final/`.
