@@ -41,7 +41,7 @@ def main():
     ax.set_ylabel('ROC-AUC')
     ax.set_title('Test-set ROC-AUC by model and dataset', fontsize=15, fontweight='bold')
     ax.axhline(.5, color='#777777', linestyle='--', linewidth=1, label='Random ranking (0.5)')
-    ax.legend(ncol=2, frameon=False, loc='lower left')
+    ax.legend(ncol=4, frameon=False, loc='upper center', bbox_to_anchor=(.5, -.19))
     ax.grid(axis='y', alpha=.2)
     ax.set_axisbelow(True)
     ax.spines[['top', 'right']].set_visible(False)
