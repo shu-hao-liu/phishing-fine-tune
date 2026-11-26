@@ -39,6 +39,7 @@ def main():
     p.add_argument('--threshold', type=float, default=.8)
     p.add_argument('--shingle-size', type=int, default=5)
     p.add_argument('--overwrite', action='store_true')
+    p.add_argument('--include-indices', action='store_true', help='Include 1-based matching data row numbers')
     a = p.parse_args()
     if not 0 < a.threshold <= 1 or a.shingle_size < 1:
         p.error('Threshold must be in (0, 1] and shingle size must be positive')
@@ -98,6 +99,9 @@ def main():
             'exact_normalized_body_test_rows': sum(t in norm_match for t in texts['test']),
             'near_only_test_rows': sum(t in near_match and t not in norm_match for t in texts['test']),
             'exact_or_near_test_rows': sum(t in near_match for t in texts['test'])}
+        if a.include_indices:
+            summary[split]['exact_or_near_indices_1based'] = [i for i, t in enumerate(texts['test'], 1) if t in near_match]
+            summary[split]['exact_normalized_indices_1based'] = [i for i, t in enumerate(texts['test'], 1) if t in norm_match]
     out = {'method': 'exact character-shingle Jaccard similarity with prefix filtering',
            'normalization': 'Unicode NFKC, casefold, whitespace collapsed and trimmed',
            'threshold': a.threshold, 'shingle_size': a.shingle_size, 'text_column': a.column,
