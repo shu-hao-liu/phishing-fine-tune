@@ -73,10 +73,17 @@ def main():
     if len(a.model) < 2 or len({x[0] for x in a.model}) != len(a.model) or a.resamples < 1: p.error('Supply at least two uniquely named models and positive resample count')
     fields, test = read(a.test)
     if not {'body', 'label'} <= set(fields): p.error('Test CSV requires body and label')
-    ids = json.loads(a.indices.read_text())
-    if not isinstance(ids, list) or any(type(i) is not int or i < 1 or i > len(test) for i in ids) or len(ids) != len(set(ids)):
-        p.error('Invalid 1-based row indices')
-    selected = set(ids)
+    membership = json.loads(a.indices.read_text())
+    if isinstance(membership, list):
+        membership = {'duplicated': membership}
+    if not isinstance(membership, dict) or not membership:
+        p.error('Indices must be a nonempty object mapping group names to row indices')
+    for group, ids in membership.items():
+        if not group.replace('-', '').replace('_', '').isalnum():
+            p.error('Group names must contain only letters, numbers, hyphens or underscores')
+        if not isinstance(ids, list) or any(type(i) is not int or i < 1 or i > len(test) for i in ids) or len(ids) != len(set(ids)):
+            p.error(f'Invalid 1-based row indices for {group}')
+    selected = set().union(*(set(ids) for ids in membership.values()))
     def binary(s):
         s = s.strip()
         if s in ('1', '1.0'): return 1
@@ -99,7 +106,10 @@ def main():
               'models': {name: {'path': path, 'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()} for name, path in a.model},
               'notes': ['Intervals are unadjusted for multiple comparisons.', 'Row resampling assumes independence, which may fail for duplicated or related texts.', 'A null interval indicates one or more bootstrap resamples had undefined metrics.'],
               'groups': {}}
-    for group, group_mask in [('duplicated', mask), ('non-duplicated', ~mask)]:
+    groups = [('duplicated', mask), ('non-duplicated', ~mask)]
+    if set(membership) != {'duplicated'}:
+        groups += [(name, np.isin(np.arange(1, len(test) + 1), ids)) for name, ids in membership.items()]
+    for group, group_mask in groups:
         with (a.output_dir / f'{group}.csv').open('x', encoding='utf-8', newline='') as f:
             w = csv.DictWriter(f, fieldnames=fields); w.writeheader()
             w.writerows(row for row, use in zip(test, group_mask) if use)
