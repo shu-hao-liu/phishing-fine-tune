@@ -64,6 +64,9 @@ def main():
     test_index = {t: i for i, t in enumerate(unique_test)}
     summary = {}
     for split in ('train', 'validation'):
+        if split == 'validation' and a.validation.resolve() == a.train.resolve():
+            summary[split] = dict(summary['train'])
+            continue
         print(f'Comparing {split}', flush=True)
         refs = set(texts[split]) - {''}
         raw_ref = set(raw[split]) - {''}
