@@ -23,6 +23,7 @@ def main():
     if a.output.exists() and not a.overwrite:
         parser.error('Output exists; use --overwrite or choose a different name')
     fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    highest = 0
     for ax, language in zip(axes, ('english', 'mandarin')):
         base = json.loads((a.results_dir / f'near-duplicates-{language}.json').read_text())
         val = json.loads((a.results_dir / f'near-duplicates-{language}-validation.json').read_text())
@@ -40,11 +41,12 @@ def main():
             ax.text(i, exact[i] + near[i] + .5, f"{count:,} / {row['test_rows']:,}\n({exact[i] + near[i]:.2f}%)", ha='center', va='bottom', fontsize=9)
         ax.set_xticks(x, labels, rotation=15, ha='right')
         ax.set_title(language.title(), fontweight='bold')
-        ax.set_ylim(0, 25)
+        highest = max(highest, *(x + y for x, y in zip(exact, near)))
         ax.yaxis.set_major_formatter(PercentFormatter())
         ax.grid(axis='y', alpha=.2)
         ax.set_axisbelow(True)
         ax.spines[['top', 'right']].set_visible(False)
+    axes[0].set_ylim(0, max(25, highest + 5))
     axes[0].set_ylabel('Percentage of rows in the first-named split')
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(.5, .91), ncol=2, frameon=False)
